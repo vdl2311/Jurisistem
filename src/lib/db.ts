@@ -1,30 +1,25 @@
-import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
-import fs from 'fs';
-import path from 'path';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  collection, 
+  writeBatch,
+  query as fsQuery,
+  where as fsWhere,
+  limit as fsLimit,
+  Timestamp
+} from 'firebase/firestore';
+import firebaseConfig from '../../firebase-applet-config.json';
 
-// Carrega as configurações do Firebase
-let firebaseConfig: any = {};
-try {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  }
-} catch (e) {
-  console.error("Erro ao carregar firebase-applet-config.json:", e);
-}
-
-const projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID;
+const projectId = firebaseConfig.projectId || 'pro-bolso';
 const databaseId = firebaseConfig.firestoreDatabaseId;
 
-let app;
-if (getApps().length === 0) {
-  app = initializeApp({
-    projectId: projectId,
-  });
-} else {
-  app = getApps()[0];
-}
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Inicializa o Firestore com suporte opcional a custom database ID
 export const firestore = getFirestore(app, databaseId);
@@ -35,8 +30,12 @@ function convertTimestampsToDates(obj: any): any {
   if (obj instanceof Timestamp) {
     return obj.toDate();
   }
-  if (obj && typeof obj === 'object' && obj._seconds !== undefined && obj._nanoseconds !== undefined) {
-    return new Timestamp(obj._seconds, obj._nanoseconds).toDate();
+  if (obj && typeof obj === 'object') {
+    const sec = obj.seconds !== undefined ? obj.seconds : obj._seconds;
+    const nano = obj.nanoseconds !== undefined ? obj.nanoseconds : obj._nanoseconds;
+    if (sec !== undefined && nano !== undefined) {
+      return new Timestamp(sec, nano).toDate();
+    }
   }
   if (Array.isArray(obj)) {
     return obj.map(convertTimestampsToDates);
@@ -205,6 +204,31 @@ function sortItems(items: any[], orderBy: any): any[] {
   });
 }
 
+// Otimização crucial: Cria uma query nativa do Firestore com filtros básicos de igualdade para evitar carregar toda a coleção na memória
+function buildFirestoreQuery(modelName: string, prismaWhere: any, limitVal?: number) {
+  const collRef = collection(firestore, modelName);
+  const constraints: any[] = [];
+  
+  if (prismaWhere) {
+    for (const key of Object.keys(prismaWhere)) {
+      if (key === 'OR' || key === 'AND' || key === 'NOT') continue;
+      const val = prismaWhere[key];
+      if (val !== undefined && (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean')) {
+        constraints.push(fsWhere(key, '==', val));
+      }
+    }
+  }
+  
+  if (typeof limitVal === 'number') {
+    constraints.push(fsLimit(limitVal));
+  }
+  
+  if (constraints.length > 0) {
+    return fsQuery(collRef, ...constraints);
+  }
+  return collRef;
+}
+
 // Carrega relações conforme parametro 'include' do Prisma
 async function resolveRelations(modelName: string, items: any[], include: any): Promise<any[]> {
   if (!include || items.length === 0) return items;
@@ -247,7 +271,8 @@ async function resolveRelations(modelName: string, items: any[], include: any): 
     }
 
     try {
-      const targetSnapshot = await firestore.collection(targetModel).get();
+      const q = collection(firestore, targetModel);
+      const targetSnapshot = await getDocs(q);
       const targetItems = targetSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
 
       for (let i = 0; i < resolvedItems.length; i++) {
@@ -273,7 +298,8 @@ async function resolveRelations(modelName: string, items: any[], include: any): 
 function createModelProxy(modelName: string) {
   return {
     async findMany(args: any = {}) {
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
 
       if (args.where) {
@@ -297,9 +323,9 @@ function createModelProxy(modelName: string) {
     async findUnique(args: any) {
       const where = args.where || {};
       if (where.id) {
-        const docRef = firestore.collection(modelName).doc(where.id);
-        const docSnap = await docRef.get();
-        if (!docSnap.exists) return null;
+        const docRef = doc(firestore, modelName, where.id);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) return null;
         let item = convertTimestampsToDates({ id: docSnap.id, ...docSnap.data() });
         if (args.include) {
           const resolved = await resolveRelations(modelName, [item], args.include);
@@ -308,7 +334,8 @@ function createModelProxy(modelName: string) {
         return item;
       }
 
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, where);
+      const snapshot = await getDocs(q);
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
       let matched = items.find(item => matchCriteria(item, where));
       if (!matched) return null;
@@ -320,7 +347,8 @@ function createModelProxy(modelName: string) {
     },
 
     async findFirst(args: any = {}) {
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
 
       if (args.where) {
@@ -344,9 +372,10 @@ function createModelProxy(modelName: string) {
 
       let docRef;
       if (id) {
-        docRef = firestore.collection(modelName).doc(id);
+        docRef = doc(firestore, modelName, id);
       } else {
-        docRef = firestore.collection(modelName).doc();
+        const collRef = collection(firestore, modelName);
+        docRef = doc(collRef);
         id = docRef.id;
         data.id = id;
       }
@@ -358,9 +387,9 @@ function createModelProxy(modelName: string) {
         data.updatedAt = Timestamp.now();
       }
 
-      await docRef.set(data);
+      await setDoc(docRef, data);
 
-      const savedDoc = await docRef.get();
+      const savedDoc = await getDoc(docRef);
       return convertTimestampsToDates({ id: savedDoc.id, ...savedDoc.data() });
     },
 
@@ -370,7 +399,8 @@ function createModelProxy(modelName: string) {
       let id = where.id;
 
       if (!id) {
-        const snapshot = await firestore.collection(modelName).get();
+        const q = buildFirestoreQuery(modelName, where);
+        const snapshot = await getDocs(q);
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
         const matched = items.find(item => matchCriteria(item, where));
         if (!matched) {
@@ -380,10 +410,10 @@ function createModelProxy(modelName: string) {
       }
 
       data.updatedAt = Timestamp.now();
-      const docRef = firestore.collection(modelName).doc(id);
-      await docRef.update(data);
+      const docRef = doc(firestore, modelName, id);
+      await updateDoc(docRef, data);
 
-      const savedDoc = await docRef.get();
+      const savedDoc = await getDoc(docRef);
       return convertTimestampsToDates({ id: savedDoc.id, ...savedDoc.data() });
     },
 
@@ -392,7 +422,8 @@ function createModelProxy(modelName: string) {
       let id = where.id;
 
       if (!id) {
-        const snapshot = await firestore.collection(modelName).get();
+        const q = buildFirestoreQuery(modelName, where);
+        const snapshot = await getDocs(q);
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
         const matched = items.find(item => matchCriteria(item, where));
         if (!matched) {
@@ -401,23 +432,24 @@ function createModelProxy(modelName: string) {
         id = matched.id;
       }
 
-      const docRef = firestore.collection(modelName).doc(id);
-      const savedDoc = await docRef.get();
+      const docRef = doc(firestore, modelName, id);
+      const savedDoc = await getDoc(docRef);
       const deletedData = convertTimestampsToDates({ id: savedDoc.id, ...savedDoc.data() });
-      await docRef.delete();
+      await deleteDoc(docRef);
       return deletedData;
     },
 
     async deleteMany(args: any = {}) {
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
       if (args.where) {
         items = items.filter(item => matchCriteria(item, args.where));
       }
 
-      const batch = firestore.batch();
+      const batch = writeBatch(firestore);
       for (const item of items) {
-        const docRef = firestore.collection(modelName).doc(item.id);
+        const docRef = doc(firestore, modelName, item.id);
         batch.delete(docRef);
       }
       await batch.commit();
@@ -426,16 +458,17 @@ function createModelProxy(modelName: string) {
 
     async updateMany(args: any = {}) {
       const data = convertDatesToTimestamps(args.data || {});
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
       if (args.where) {
         items = items.filter(item => matchCriteria(item, args.where));
       }
 
       data.updatedAt = Timestamp.now();
-      const batch = firestore.batch();
+      const batch = writeBatch(firestore);
       for (const item of items) {
-        const docRef = firestore.collection(modelName).doc(item.id);
+        const docRef = doc(firestore, modelName, item.id);
         batch.update(docRef, data);
       }
       await batch.commit();
@@ -443,7 +476,8 @@ function createModelProxy(modelName: string) {
     },
 
     async count(args: any = {}) {
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
       if (args.where) {
         items = items.filter(item => matchCriteria(item, args.where));
@@ -452,7 +486,8 @@ function createModelProxy(modelName: string) {
     },
 
     async aggregate(args: any = {}) {
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
       if (args.where) {
         items = items.filter(item => matchCriteria(item, args.where));
@@ -479,7 +514,8 @@ function createModelProxy(modelName: string) {
     },
 
     async groupBy(args: any = {}) {
-      const snapshot = await firestore.collection(modelName).get();
+      const q = buildFirestoreQuery(modelName, args.where);
+      const snapshot = await getDocs(q);
       let items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).map(convertTimestampsToDates);
       if (args.where) {
         items = items.filter(item => matchCriteria(item, args.where));

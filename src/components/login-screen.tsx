@@ -6,18 +6,26 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
+import { auth } from '@/lib/firebase'
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth'
+import { db } from '@/lib/db'
 
 interface LoginProps {
   onLogin: (user: { id: string; name: string; email: string; role: string }) => void
 }
 
 export function LoginScreen({ onLogin }: LoginProps) {
-  const [email, setEmail] = useState('patricia@jusflow.com')
-  const [password, setPassword] = useState('demo123')
+  const [email, setEmail] = useState('vidal2311usa@gmail.com')
+  const [password, setPassword] = useState('123456')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [requires2FA, setRequires2FA] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  
+  const [view, setView] = useState<'login' | 'forgot'>('login')
+  const [recoverEmail, setRecoverEmail] = useState('')
+  const [recoverSuccess, setRecoverSuccess] = useState(false)
+  const [recoverError, setRecoverError] = useState('')
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -25,23 +33,122 @@ export function LoginScreen({ onLogin }: LoginProps) {
     setError('')
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, twoFactorCode }),
-      })
-      const data = await res.json()
+      let firebaseUser;
+      
+      const isDemo = email === 'vidal2311usa@gmail.com' || email === 'roberto@jusflow.com' || email === 'admin@jusflow.com';
+      const demoPasswords: Record<string, string> = {
+        'vidal2311usa@gmail.com': '123456',
+        'roberto@jusflow.com': 'demo123',
+        'admin@jusflow.com': 'demo123',
+      };
 
-      if (data.requires2FA) {
-        setRequires2FA(true)
-        setError('')
-      } else if (data.error) {
-        setError(data.error)
-      } else {
-        onLogin(data.user)
+      try {
+        const userCred = await signInWithEmailAndPassword(auth, email, password);
+        firebaseUser = userCred.user;
+      } catch (authError: any) {
+        // Se for conta demo e a senha bater, registra ela na hora caso não exista no Firebase Auth
+        if (isDemo && password === demoPasswords[email] && (authError.code === 'auth/user-not-found' || authError.code === 'auth/invalid-credential')) {
+          try {
+            const userCred = await createUserWithEmailAndPassword(auth, email, password);
+            firebaseUser = userCred.user;
+          } catch (signUpError: any) {
+            console.error("Erro ao registrar conta demo:", signUpError);
+            throw authError; // Lança o erro original de login
+          }
+        } else {
+          let userFriendlyMessage = 'E-mail ou senha incorretos.';
+          if (authError.code === 'auth/invalid-credential' || authError.code === 'auth/wrong-password' || authError.code === 'auth/user-not-found') {
+            userFriendlyMessage = 'E-mail ou senha incorretos.';
+          } else if (authError.code === 'auth/too-many-requests') {
+            userFriendlyMessage = 'Muitas tentativas malsucedidas. Tente novamente mais tarde.';
+          } else if (authError.code === 'auth/invalid-email') {
+            userFriendlyMessage = 'E-mail inválido.';
+          } else if (authError.message) {
+            userFriendlyMessage = authError.message;
+          }
+          throw new Error(userFriendlyMessage);
+        }
       }
-    } catch {
-      setError('Erro de conexão. Tente novamente.')
+
+      if (!firebaseUser) {
+        throw new Error('Falha na autenticação.');
+      }
+
+      // Busca dados adicionais do usuário (como role) no Firestore
+      let userDoc = await db.user.findUnique({ where: { email } });
+      
+      if (!userDoc) {
+        // Cria documento do usuário em lote no Firestore caso não exista
+        const role = email === 'vidal2311usa@gmail.com' || email === 'admin@jusflow.com' ? 'Admin' : 'Advogado';
+        const name = email === 'vidal2311usa@gmail.com' ? 'Administrador (Vidal)' : (email === 'admin@jusflow.com' ? 'Administrador' : 'Dr. Roberto Lima');
+        
+        userDoc = await db.user.create({
+          data: {
+            id: firebaseUser.uid,
+            name,
+            email,
+            password: 'firebase-auth-managed',
+            role,
+            permissions: 'all',
+            twoFactorEnabled: false
+          }
+        });
+      }
+
+      if (userDoc.twoFactorEnabled && twoFactorCode !== '123456') {
+        setRequires2FA(true);
+        setLoading(false);
+        return;
+      }
+
+      // Registra último login e log de auditoria
+      await db.user.update({
+        where: { id: userDoc.id },
+        data: { lastLogin: new Date() },
+      });
+
+      await db.auditLog.create({
+        data: {
+          user: userDoc.name,
+          action: 'LOGIN',
+          entity: 'User',
+          entityId: userDoc.id,
+          details: `Login via Firebase Auth realizado por ${userDoc.email}`,
+        },
+      });
+
+      onLogin({
+        id: userDoc.id,
+        name: userDoc.name,
+        email: userDoc.email,
+        role: userDoc.role,
+        permissions: userDoc.permissions || 'all',
+      });
+    } catch (err: any) {
+      console.error("Login Error:", err);
+      setError(err.message || 'Ocorreu um erro ao realizar o login.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleRecover = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setRecoverError('')
+    
+    try {
+      await sendPasswordResetEmail(auth, recoverEmail)
+      setRecoverSuccess(true)
+    } catch (err: any) {
+      console.error("Recuperação de senha falhou:", err)
+      let userFriendlyMessage = 'Ocorreu um erro ao enviar as instruções. Verifique o e-mail informado.';
+      if (err.code === 'auth/invalid-email') {
+        userFriendlyMessage = 'E-mail inválido.';
+      } else if (err.code === 'auth/user-not-found') {
+        userFriendlyMessage = 'Nenhum usuário encontrado com este e-mail.';
+      }
+      setRecoverError(userFriendlyMessage)
     } finally {
       setLoading(false)
     }
@@ -99,98 +206,163 @@ export function LoginScreen({ onLogin }: LoginProps) {
             <span className="font-semibold text-lg">JusFlow</span>
           </div>
 
-          <div className="space-y-2 mb-6">
-            <h2 className="text-2xl font-bold">Entrar</h2>
-            <p className="text-sm text-muted-foreground">
-              Acesse sua conta para continuar.
-            </p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="email">E-mail</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-9"
-                  placeholder="seu@email.com"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Senha</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-9"
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-            </div>
-
-            {requires2FA && (
-              <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2">
-                <Label htmlFor="2fa" className="flex items-center gap-1.5">
-                  <Shield className="h-3.5 w-3.5" />
-                  Código 2FA
-                </Label>
-                <Input
-                  id="2fa"
-                  value={twoFactorCode}
-                  onChange={(e) => setTwoFactorCode(e.target.value)}
-                  placeholder="000000"
-                  maxLength={6}
-                  className="text-center tracking-[0.3em] font-mono"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  💡 Demo: use <code className="bg-muted px-1 rounded">123456</code>
+          {view === 'login' ? (
+            <>
+              <div className="space-y-2 mb-6">
+                <h2 className="text-2xl font-bold">Entrar</h2>
+                <p className="text-sm text-muted-foreground">
+                  Acesse sua conta para continuar.
                 </p>
               </div>
-            )}
 
-            {error && (
-              <div className="rounded-md bg-destructive/10 text-destructive text-sm p-2.5 border border-destructive/20">
-                {error}
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="email">E-mail</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="pl-9"
+                      placeholder="seu@email.com"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="password">Senha</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-9"
+                      placeholder="••••••••"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {requires2FA && (
+                  <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2">
+                    <Label htmlFor="2fa" className="flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5" />
+                      Código 2FA
+                    </Label>
+                    <Input
+                      id="2fa"
+                      value={twoFactorCode}
+                      onChange={(e) => setTwoFactorCode(e.target.value)}
+                      placeholder="000000"
+                      maxLength={6}
+                      className="text-center tracking-[0.3em] font-mono"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      💡 Demo: use <code className="bg-muted px-1 rounded">123456</code>
+                    </p>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="rounded-md bg-destructive/10 text-destructive text-sm p-2.5 border border-destructive/20">
+                    {error}
+                  </div>
+                )}
+
+                <Button type="submit" disabled={loading} className="w-full">
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      Entrar
+                      <ArrowRight className="h-4 w-4 ml-1.5" />
+                    </>
+                  )}
+                </Button>
+              </form>
+
+              <details className="mt-4 rounded-md bg-muted/50 border border-border">
+                <summary className="text-[11px] text-muted-foreground font-medium p-3 cursor-pointer">
+                  🔑 Contas demo
+                </summary>
+                <div className="px-3 pb-3 space-y-0.5 text-[11px] text-muted-foreground">
+                  <p><strong>vidal2311usa@gmail.com</strong> (senha: <code>123456</code>) — Admin</p>
+                  <p><strong>roberto@jusflow.com</strong> (senha: <code>demo123</code>) — Advogado</p>
+                  <p><strong>admin@jusflow.com</strong> (senha: <code>demo123</code>) — Administrador</p>
+                </div>
+              </details>
+
+              <p className="mt-4 text-[11px] text-center text-muted-foreground">
+                Esqueceu sua senha? <button type="button" onClick={() => setView('forgot')} className="text-primary hover:underline cursor-pointer">Recuperar acesso</button>
+              </p>
+            </>
+          ) : (
+            <div className="animate-in fade-in slide-in-from-right-4">
+              <div className="space-y-2 mb-6">
+                <h2 className="text-2xl font-bold">Recuperar Senha</h2>
+                <p className="text-sm text-muted-foreground">
+                  Insira seu e-mail para receber as instruções de recuperação.
+                </p>
               </div>
-            )}
 
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+              {recoverSuccess ? (
+                <div className="space-y-4">
+                  <div className="rounded-md bg-emerald-500/10 text-emerald-600 text-sm p-4 border border-emerald-500/20 text-center">
+                    <p className="font-medium">E-mail de recuperação enviado!</p>
+                    <p className="text-[11px] mt-1 opacity-90">Verifique sua caixa de entrada e a pasta de spam.</p>
+                  </div>
+                  <Button type="button" variant="outline" className="w-full" onClick={() => {
+                    setView('login');
+                    setRecoverSuccess(false);
+                    setRecoverEmail('');
+                  }}>
+                    Voltar ao login
+                  </Button>
+                </div>
               ) : (
-                <>
-                  Entrar
-                  <ArrowRight className="h-4 w-4 ml-1.5" />
-                </>
+                <form onSubmit={handleRecover} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="recoverEmail">E-mail cadastrado</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="recoverEmail"
+                        type="email"
+                        value={recoverEmail}
+                        onChange={(e) => setRecoverEmail(e.target.value)}
+                        className="pl-9"
+                        placeholder="seu@email.com"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {recoverError && (
+                    <div className="rounded-md bg-destructive/10 text-destructive text-sm p-2.5 border border-destructive/20">
+                      {recoverError}
+                    </div>
+                  )}
+
+                  <Button type="submit" disabled={loading} className="w-full">
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      'Enviar instruções'
+                    )}
+                  </Button>
+
+                  <p className="text-[11px] text-center text-muted-foreground mt-4">
+                    Lembrou a senha? <button type="button" onClick={() => setView('login')} className="text-primary hover:underline cursor-pointer">Voltar ao login</button>
+                  </p>
+                </form>
               )}
-            </Button>
-          </form>
-
-          <details className="mt-4 rounded-md bg-muted/50 border border-border">
-            <summary className="text-[11px] text-muted-foreground font-medium p-3 cursor-pointer">
-              🔑 Contas demo (senha: <code>demo123</code>)
-            </summary>
-            <div className="px-3 pb-3 space-y-0.5 text-[11px] text-muted-foreground">
-              <p><strong>patricia@jusflow.com</strong> — Sócia (com 2FA)</p>
-              <p><strong>roberto@jusflow.com</strong> — Advogado</p>
-              <p><strong>admin@jusflow.com</strong> — Administrador</p>
             </div>
-          </details>
-
-          <p className="mt-4 text-[11px] text-center text-muted-foreground">
-            Esqueceu sua senha? <a className="text-primary hover:underline cursor-pointer">Recuperar acesso</a>
-          </p>
+          )}
         </div>
       </div>
     </div>

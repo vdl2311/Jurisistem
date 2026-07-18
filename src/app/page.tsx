@@ -5,6 +5,10 @@ import { Sidebar } from '@/components/sidebar'
 import { TopBar } from '@/components/top-bar'
 import { CommandPalette } from '@/components/command-palette'
 import { LoginScreen } from '@/components/login-screen'
+import { auth } from '@/lib/firebase'
+import { onAuthStateChanged, signOut } from 'firebase/auth'
+import { db } from '@/lib/db'
+import { Scale } from 'lucide-react'
 import { DashboardView } from '@/components/views/dashboard-view'
 import { ProcessesView } from '@/components/views/processes-view'
 import { ProcessDetail } from '@/components/views/process-detail'
@@ -68,23 +72,52 @@ export default function Home() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [restoringSession, setRestoringSession] = useState(true)
 
-  // Persistir sessão
+  // Persistir sessão e escutar estado do Firebase Auth
   useEffect(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('jusflow_user') : null
-    if (saved) {
-      try { setUser(JSON.parse(saved)) } catch {}
-    }
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const userDoc = await db.user.findUnique({ where: { email: firebaseUser.email } })
+          if (userDoc) {
+            setUser({
+              id: userDoc.id,
+              name: userDoc.name,
+              email: userDoc.email,
+              role: userDoc.role,
+            })
+          } else {
+            setUser({
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || 'Advogado',
+              email: firebaseUser.email || '',
+              role: 'Advogado',
+            })
+          }
+        } catch (e) {
+          console.error("Erro ao carregar dados do usuário:", e)
+        }
+      } else {
+        setUser(null)
+      }
+      setRestoringSession(false)
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const handleLogin = (u: User) => {
     setUser(u)
-    if (typeof window !== 'undefined') localStorage.setItem('jusflow_user', JSON.stringify(u))
   }
 
-  const handleLogout = () => {
-    setUser(null)
-    if (typeof window !== 'undefined') localStorage.removeItem('jusflow_user')
+  const handleLogout = async () => {
+    try {
+      await signOut(auth)
+      setUser(null)
+    } catch (e) {
+      console.error("Erro ao fazer logout:", e)
+    }
   }
 
   // Atalho Cmd+K
@@ -132,6 +165,17 @@ export default function Home() {
     setView(v)
     setMobileSidebarOpen(false)
   }, [])
+
+  if (restoringSession) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
+        <div className="h-12 w-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center animate-pulse">
+          <Scale className="h-6 w-6 animate-bounce" />
+        </div>
+        <p className="text-sm text-muted-foreground animate-pulse font-medium">Restaurando sessão segura...</p>
+      </div>
+    )
+  }
 
   if (!user) {
     return <LoginScreen onLogin={handleLogin} />

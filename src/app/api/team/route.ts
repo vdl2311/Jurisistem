@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { adminAuth } from '@/lib/firebase-admin'
 
 // GET /api/team
 export async function GET() {
@@ -23,10 +24,31 @@ export async function GET() {
 // POST /api/team
 export async function POST(req: NextRequest) {
   const body = await req.json()
+  
+  let firebaseUser;
+  try {
+    firebaseUser = await adminAuth.createUser({
+      email: body.email,
+      password: 'demo123', // Senha padrão informada no modal
+      displayName: body.name,
+    })
+  } catch (err: any) {
+    if (err.code === 'auth/email-already-exists') {
+      try {
+        firebaseUser = await adminAuth.getUserByEmail(body.email)
+      } catch (getErr: any) {
+        return NextResponse.json({ error: `Erro ao obter usuário existente no Firebase: ${getErr.message}` }, { status: 400 })
+      }
+    } else {
+      return NextResponse.json({ error: `Erro ao criar usuário no Firebase Auth: ${err.message}` }, { status: 400 })
+    }
+  }
+
   const user = await db.user.create({
     data: {
+      id: firebaseUser.uid, // Sincroniza o id no Firestore com o UID do Firebase Auth
       email: body.email,
-      password: '$2a$10$hashdemo',
+      password: 'firebase-auth-managed',
       name: body.name,
       role: body.role || 'Advogado',
       oab: body.oab,
@@ -34,13 +56,14 @@ export async function POST(req: NextRequest) {
       twoFactorEnabled: body.twoFactorEnabled || false,
     },
   })
+
   await db.auditLog.create({
     data: {
       user: 'Sistema',
       action: 'CREATE',
       entity: 'User',
       entityId: user.id,
-      details: `Usuário criado: ${user.name} (${user.role})`,
+      details: `Usuário convidado e criado no Firebase Auth: ${user.name} (${user.role})`,
     },
   })
   return NextResponse.json(user, { status: 201 })
@@ -52,6 +75,20 @@ export async function PATCH(req: NextRequest) {
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   const body = await req.json()
+
+  // Sincroniza e-mail ou nome alterados com o Firebase Auth
+  try {
+    const updateParams: any = {}
+    if (body.email) updateParams.email = body.email
+    if (body.name) updateParams.displayName = body.name
+    
+    if (Object.keys(updateParams).length > 0) {
+      await adminAuth.updateUser(id, updateParams)
+    }
+  } catch (err) {
+    console.error("Erro ao atualizar e-mail/nome no Firebase Auth:", err)
+  }
+
   const allowedFields: Record<string, unknown> = {}
   for (const f of ['name', 'email', 'role', 'oab', 'permissions']) {
     if (body[f] !== undefined) allowedFields[f] = body[f]
@@ -71,6 +108,15 @@ export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+  
+  // Deleta o usuário do Firebase Auth
+  try {
+    await adminAuth.deleteUser(id)
+  } catch (err) {
+    console.error("Erro ao deletar usuário no Firebase Auth:", err)
+  }
+
   await db.user.delete({ where: { id } })
   return NextResponse.json({ ok: true })
 }
+
