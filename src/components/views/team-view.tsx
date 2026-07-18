@@ -28,6 +28,9 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { MaskedInput } from '@/components/ui/masked-input'
 import { applyMask } from '@/lib/masks'
+import { useQuery } from "convex/react"
+import { api } from "../../../convex/_generated/api"
+import { useTeamInvite } from "@/hooks/use-team-invite"
 
 interface User {
   id: string
@@ -67,49 +70,36 @@ const roleColor = (role: string) => {
 }
 
 export function TeamView() {
-  const [users, setUsers] = useState<User[]>([])
-  const [loading, setLoading] = useState(true)
-  const [modalOpen, setModalOpen] = useState(false)
-  const { toast } = useToast()
+  const convexUsers = useQuery(api.users.listTeam);
+  const [modalOpen, setModalOpen] = useState(false);
+  const { toast } = useToast();
+  const { inviteMember, loading: inviteLoading } = useTeamInvite();
 
-  const load = () => {
-    setLoading(true)
-    fetch('/api/team')
-      .then((r) => r.json())
-      .then(setUsers)
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { load() }, [])
-
-  const handleCreate = async (data: Record<string, unknown>) => {
-    const res = await fetch('/api/team', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (res.ok) {
-      toast({ title: 'Usuário criado', description: 'Convite enviado por e-mail.' })
-      setModalOpen(false)
-      load()
+  const handleCreate = async (data: Record<string, any>) => {
+    try {
+      await inviteMember({
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        permissions: data.permissions,
+      });
+      setModalOpen(false);
+    } catch (error) {
+      // O erro já é tratado no hook via toast
     }
   }
 
-  const toggle2FA = async (u: User) => {
-    await fetch(`/api/team?id=${u.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ twoFactorEnabled: !u.twoFactorEnabled }),
-    })
-    toast({ title: '2FA atualizado', description: `${u.name}: ${!u.twoFactorEnabled ? 'ativado' : 'desativado'}` })
-    load()
+  const users = convexUsers || [];
+  const loading = convexUsers === undefined;
+
+  const toggle2FA = async (u: any) => {
+    // Implementar mutação no Convex futuramente
+    toast({ title: 'Em breve', description: 'Atualização via Convex será implementada.' })
   }
 
-  const remove = async (u: User) => {
-    if (!confirm(`Remover ${u.name}?`)) return
-    await fetch(`/api/team?id=${u.id}`, { method: 'DELETE' })
-    toast({ title: 'Usuário removido' })
-    load()
+  const remove = async (u: any) => {
+    // Implementar mutação no Convex futuramente
+    toast({ title: 'Em breve', description: 'Remoção via Convex será implementada.' })
   }
 
   return (
@@ -136,7 +126,7 @@ export function TeamView() {
             const perms = u.permissions === 'all' ? ['Todas'] : (u.permissions || '').split(',').filter(Boolean)
             const initials = u.name.split(' ').slice(0, 2).map((p) => p[0]).join('')
             return (
-              <Card key={u.id}>
+              <Card key={u._id || u.id}>
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="h-12 w-12 rounded-full bg-primary/15 text-primary flex items-center justify-center font-semibold shrink-0">
@@ -163,7 +153,7 @@ export function TeamView() {
                       {u.lastLogin && (
                         <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          Último acesso: {formatDateTime(u.lastLogin)}
+                          Último acesso: {typeof u.lastLogin === 'number' ? formatDateTime(new Date(u.lastLogin).toISOString()) : formatDateTime(u.lastLogin)}
                         </p>
                       )}
                       <div className="flex flex-wrap gap-1 mt-2">
