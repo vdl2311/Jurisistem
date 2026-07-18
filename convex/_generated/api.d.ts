@@ -34,5 +34,20 @@ export declare const api: {
     list: any;
     create: any;
     markAsPaid: any;
+  },
+  notifications: {
+    listByUser: any;
+    create: any;
+    markAsRead: any;
+    markAllAsRead: any;
+  },
+  events: {
+    listByUser: any;
+    create: any;
+    update: any;
+    remove: any;
+  },
+  actions: {
+    datajudSearch: any;
   }
 };

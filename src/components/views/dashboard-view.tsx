@@ -78,31 +78,36 @@ interface Props {
 }
 
 export function DashboardView({ onOpenProcess, onNavigate }: Props) {
-  const convexStats = useQuery(api.dashboard.getStats)
-  const loading = convexStats === undefined
-  const data = convexStats
+  const convexData = useQuery(api.dashboard.getStats, { userId: "user-123" })
+
+  const data = convexData as unknown as DashboardData
+  const loading = convexData === undefined
 
   if (loading || !data) {
     return (
       <div className="p-4 md:p-6 space-y-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-28 rounded-lg bg-muted/40 animate-pulse" />
-        ))}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-28 rounded-lg bg-muted/40 animate-pulse" />
+          ))}
+        </div>
+        <div className="h-64 rounded-lg bg-muted/40 animate-pulse" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="h-64 rounded-lg bg-muted/40 animate-pulse" />
+          <div className="h-64 rounded-lg bg-muted/40 animate-pulse" />
+        </div>
       </div>
     )
   }
 
-  const honorariosAtrasados: any[] = []
-  const tarefasAtrasadas = 0
-  const lucroMes = data.resumo.recebidoMes - data.resumo.despesasMes
-  const pieData = data.processosPorArea
+  const lucroMes = (data.resumo?.recebidoMes || 0) - (data.resumo?.despesasMes || 0)
+  const pieData = data.processosPorArea || []
   const pieColors = ['oklch(0.55 0.13 155)', 'oklch(0.65 0.18 250)', 'oklch(0.7 0.18 60)', 'oklch(0.62 0.22 25)', 'oklch(0.65 0.16 295)']
-  const processosParados: any[] = []
 
   return (
     <div className="p-4 md:p-6 space-y-5">
       {/* Hero: alertas críticos */}
-      {(data.resumo.prazosHoje > 0 || honorariosAtrasados.length > 0 || tarefasAtrasadas > 0) && (
+      {(data.resumo.prazosHoje > 0 || data.resumo.tarefasAtrasadas > 0) && (
         <Card className="border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900/50">
           <CardContent className="p-4 md:p-5">
             <div className="flex items-start gap-3">
@@ -113,15 +118,11 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
                 <h3 className="font-semibold text-amber-900 dark:text-amber-200">Atenção necessária hoje</h3>
                 <p className="text-sm text-amber-700 dark:text-amber-300 mt-0.5">
                   {data.resumo.prazosHoje > 0 && `${data.resumo.prazosHoje} prazo(s) vencendo hoje • `}
-                  {honorariosAtrasados.length > 0 && `${honorariosAtrasados.length} honorário(s) em atraso • `}
-                  {tarefasAtrasadas > 0 && `${tarefasAtrasadas} tarefa(s) atrasada(s)`}
+                  {data.resumo.tarefasAtrasadas > 0 && `${data.resumo.tarefasAtrasadas} tarefa(s) atrasada(s)`}
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2.5">
                   <Button size="sm" variant="outline" onClick={() => onNavigate('deadlines')}>
                     Ver prazos
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => onNavigate('financial')}>
-                    Ver financeiro
                   </Button>
                 </div>
               </div>
@@ -273,7 +274,7 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
                   <AlarmClock className="h-4 w-4 text-amber-500" />
                   Prazos de hoje
                 </CardTitle>
-                <CardDescription>{data.prazosDeHoje.length} vencendo hoje</CardDescription>
+                <CardDescription>{data.prazosDeHoje?.length || 0} vencendo hoje</CardDescription>
               </div>
               <Button variant="ghost" size="sm" onClick={() => onNavigate('deadlines')}>
                 Ver todos <ChevronRight className="h-4 w-4" />
@@ -281,14 +282,14 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            {data.prazosDeHoje.length === 0 ? (
+            {(!data.prazosDeHoje || data.prazosDeHoje.length === 0) ? (
               <EmptyState text="Nenhum prazo para hoje. Bom trabalho!" />
             ) : (
               <ul className="space-y-2 max-h-72 overflow-y-auto">
                 {data.prazosDeHoje.map((d) => (
                   <li
-                    key={d.id}
-                    onClick={() => d.process && onOpenProcess(d.processId)}
+                    key={d._id}
+                    onClick={() => d.processId && onOpenProcess(d.processId)}
                     className="cursor-pointer rounded-md border border-border p-3 hover:bg-accent/50 transition-colors"
                   >
                     <div className="flex items-start gap-2">
@@ -297,9 +298,6 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
                       </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{d.title}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">
-                          {d.process?.title}
-                        </p>
                       </div>
                     </div>
                   </li>
@@ -325,14 +323,14 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            {processosParados.length === 0 ? (
+            {(!data.processosParados || data.processosParados.length === 0) ? (
               <EmptyState text="Todos os processos estão em movimento." />
             ) : (
               <ul className="space-y-2 max-h-72 overflow-y-auto">
-                {processosParados.map((p) => (
+                {data.processosParados.map((p) => (
                   <li
-                    key={p.id}
-                    onClick={() => onOpenProcess(p.id)}
+                    key={p._id || p.id}
+                    onClick={() => onOpenProcess(p._id || p.id)}
                     className="cursor-pointer rounded-md border border-border p-3 hover:bg-accent/50 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -352,42 +350,8 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
         </Card>
       </div>
 
-      {/* Honorários atrasados + Ações sugeridas */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <ArrowDownCircle className="h-4 w-4 text-red-500" />
-              Honorários em atraso
-            </CardTitle>
-            <CardDescription>{honorariosAtrasados.length} em atraso</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {honorariosAtrasados.length === 0 ? (
-              <EmptyState text="Nenhum honorário em atraso." />
-            ) : (
-              <ul className="space-y-2 max-h-72 overflow-y-auto">
-                {honorariosAtrasados.map((h) => (
-                  <li
-                    key={h.id}
-                    className="rounded-md border border-border p-3 flex items-start justify-between gap-2"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{h.description}</p>
-                      <p className="text-[11px] text-muted-foreground truncate">
-                        {h.client?.name} • Venc.: {formatDate(h.dueDate)}
-                      </p>
-                    </div>
-                    <span className="text-sm font-semibold text-red-600 dark:text-red-400">
-                      {formatCurrency(h.amount)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-
+      {/* Ações sugeridas */}
+      <div className="grid grid-cols-1 lg:grid-cols-1 gap-4">
         <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -398,16 +362,8 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
           </CardHeader>
           <CardContent className="pt-0 space-y-2">
             <SuggestedAction
-              text="Resumir o processo João Santos vs Construtora Horizonte antes da audiência de amanhã"
-              onClick={() => onNavigate('copilot')}
-            />
-            <SuggestedAction
-              text={`Enviar cobrança de R$ ${honorariosAtrasados[0]?.amount.toFixed(2) || '0'} para ${honorariosAtrasados[0]?.client?.name || ''}`}
-              onClick={() => onNavigate('financial')}
-            />
-            <SuggestedAction
-              text={`${data.resumo.processosAtivos} processo(s) ativos no sistema.`}
-              onClick={() => onNavigate('processes')}
+              text="Verificar prazos de hoje"
+              onClick={() => onNavigate('deadlines')}
             />
             <Button className="w-full mt-2" onClick={() => onNavigate('copilot')}>
               <Sparkles className="h-4 w-4 mr-2" />
@@ -419,6 +375,72 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
     </div>
   )
 }
+
+function KpiCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  color,
+  onClick,
+}: {
+  label: string
+  value: string | number
+  sub?: string
+  icon: React.ComponentType<{ className?: string }>
+  color: 'emerald' | 'red' | 'blue' | 'purple'
+  onClick?: () => void
+}) {
+  const colorMap = {
+    emerald: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30',
+    red: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30',
+    blue: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30',
+    purple: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30',
+  }
+  return (
+    <Card
+      className={cn(onClick && 'cursor-pointer hover:shadow-md transition-shadow')}
+      onClick={onClick}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+            {label}
+          </p>
+          <div className={cn('h-8 w-8 rounded-md flex items-center justify-center', colorMap[color])}>
+            <Icon className="h-4 w-4" />
+          </div>
+        </div>
+        <p className="text-xl md:text-2xl font-semibold mt-2 leading-none">{value}</p>
+        {sub && <p className="text-[11px] text-muted-foreground mt-1">{sub}</p>}
+      </CardContent>
+    </Card>
+  )
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-8 text-center">
+      <Activity className="h-8 w-8 text-muted-foreground/40 mb-2" />
+      <p className="text-sm text-muted-foreground">{text}</p>
+    </div>
+  )
+}
+
+function SuggestedAction({ text, onClick }: { text: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left rounded-md border border-primary/20 bg-card/60 hover:bg-card p-2.5 text-sm transition-colors"
+    >
+      <div className="flex items-start gap-2">
+        <ChevronRight className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+        <span>{text}</span>
+      </div>
+    </button>
+  )
+}
+
 
 function KpiCard({
   label,

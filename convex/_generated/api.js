@@ -34,5 +34,20 @@ export const api = {
     list: "financial:list",
     create: "financial:create",
     markAsPaid: "financial:markAsPaid",
+  },
+  notifications: {
+    listByUser: "notifications:listByUser",
+    create: "notifications:create",
+    markAsRead: "notifications:markAsRead",
+    markAllAsRead: "notifications:markAllAsRead",
+  },
+  events: {
+    listByUser: "events:listByUser",
+    create: "events:create",
+    update: "events:update",
+    remove: "events:remove",
+  },
+  actions: {
+    datajudSearch: "actions:datajudSearch",
   }
 };

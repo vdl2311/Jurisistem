@@ -5,76 +5,22 @@ export default defineSchema({
   users: defineTable({
     name: v.string(),
     email: v.string(),
-    role: v.string(),
-    permissions: v.string(),
+    role: v.string(), // e.g., "Admin", "Advogado", "Secretária"
+    permissions: v.string(), // comma-separated or JSON
     oab: v.optional(v.string()),
     createdAt: v.number(),
     lastLogin: v.optional(v.number()),
-    externalId: v.optional(v.string()),
+    externalId: v.optional(v.string()), // Firebase UID
   }).index("by_email", ["email"]),
 
-  clients: defineTable({
-    name: v.string(),
+  invites: defineTable({
     email: v.string(),
-    phone: v.string(),
-    cpfCnpj: v.string(),
-    type: v.string(), // "Pessoa Física" | "Pessoa Jurídica"
-    address: v.optional(v.string()),
-    notes: v.optional(v.string()),
-    status: v.string(), // "Ativo" | "Inativo"
+    role: v.string(),
+    permissions: v.string(),
+    status: v.string(), // "pending", "accepted", "expired"
+    invitedBy: v.string(),
     createdAt: v.number(),
-  }).index("by_cpfCnpj", ["cpfCnpj"]),
-
-  processes: defineTable({
-    number: v.string(),
-    title: v.string(),
-    clientName: v.string(),
-    clientId: v.optional(v.id("clients")),
-    court: v.string(), // Tribunal
-    instance: v.string(), // Instância
-    status: v.string(), // "Ativo" | "Suspenso" | "Arquivado"
-    priority: v.string(), // "Baixa" | "Média" | "Alta" | "Urgente"
-    category: v.string(), // "Cível" | "Trabalhista" | etc
-    value: v.optional(v.number()),
-    distributionDate: v.optional(v.number()),
-    lastMovement: v.optional(v.string()),
-    createdAt: v.number(),
-  }).index("by_number", ["number"]),
-
-  deadlines: defineTable({
-    title: v.string(),
-    description: v.optional(v.string()),
-    dueDate: v.number(),
-    processId: v.optional(v.id("processes")),
-    processNumber: v.optional(v.string()),
-    status: v.string(), // "Pendente" | "Concluído" | "Atrasado"
-    priority: v.string(),
-    assignedTo: v.optional(v.id("users")),
-    createdAt: v.number(),
-  }).index("by_due_date", ["dueDate"]),
-
-  tasks: defineTable({
-    title: v.string(),
-    description: v.optional(v.string()),
-    status: v.string(),
-    priority: v.string(),
-    dueDate: v.optional(v.number()),
-    assignedTo: v.optional(v.id("users")),
-    processId: v.optional(v.id("processes")),
-    createdAt: v.number(),
-  }),
-
-  financial: defineTable({
-    type: v.string(), // "Receita" | "Despesa"
-    description: v.string(),
-    value: v.number(),
-    date: v.number(),
-    status: v.string(), // "Pago" | "Pendente"
-    category: v.string(),
-    clientId: v.optional(v.id("clients")),
-    processId: v.optional(v.id("processes")),
-    createdAt: v.number(),
-  }).index("by_date", ["date"]),
+  }).index("by_email", ["email"]),
 
   auditLogs: defineTable({
     userId: v.string(),
@@ -82,4 +28,26 @@ export default defineSchema({
     details: v.string(),
     timestamp: v.number(),
   }),
+
+  notifications: defineTable({
+    userId: v.string(),
+    title: v.string(),
+    message: v.string(),
+    type: v.string(), // "info", "warning", "error", "success"
+    read: v.boolean(),
+    link: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  events: defineTable({
+    title: v.string(),
+    description: v.optional(v.string()),
+    start: v.number(),
+    end: v.number(),
+    type: v.string(), // "Audiência", "Reunião", "Prazo", "Outro"
+    location: v.optional(v.string()),
+    processId: v.optional(v.id("processes")),
+    userId: v.string(),
+    createdAt: v.number(),
+  }).index("by_user_time", ["userId", "start"]),
 });

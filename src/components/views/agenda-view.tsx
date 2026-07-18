@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,19 +12,6 @@ import { priorityColor } from '@/lib/format'
 
 type ViewMode = 'month' | 'week' | 'day'
 
-interface Evento {
-  id: string
-  tipo: string
-  titulo: string
-  data: string
-  prioridade: string
-  responsavel: string | null
-  processo: string | null
-  cliente: string | null
-  processId: string | null
-  allDay: boolean
-}
-
 interface Props {
   onOpenProcess: (id: string) => void
 }
@@ -31,8 +20,8 @@ const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
 
 function iconForTipo(tipo: string) {
-  switch (tipo) {
-    case 'audiencia': return Gavel
+  switch (tipo.toLowerCase()) {
+    case 'audiência': return Gavel
     case 'prazo': return Clock
     case 'tarefa': return CheckSquare
     default: return CalIcon
@@ -40,8 +29,8 @@ function iconForTipo(tipo: string) {
 }
 
 function colorForTipo(tipo: string) {
-  switch (tipo) {
-    case 'audiencia': return 'bg-red-500'
+  switch (tipo.toLowerCase()) {
+    case 'audiência': return 'bg-red-500'
     case 'prazo': return 'bg-amber-500'
     case 'tarefa': return 'bg-purple-500'
     default: return 'bg-blue-500'
@@ -51,22 +40,22 @@ function colorForTipo(tipo: string) {
 export function AgendaView({ onOpenProcess }: Props) {
   const [mode, setMode] = useState<ViewMode>('month')
   const [currentDate, setCurrentDate] = useState(new Date())
-  const [eventos, setEventos] = useState<Evento[]>([])
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const inicio = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
-    const fim = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
-    setLoading(true)
-    fetch(`/api/agenda?inicio=${inicio.toISOString()}&fim=${fim.toISOString()}`)
-      .then((r) => r.json())
-      .then((d) => setEventos(d.eventos || []))
-      .finally(() => setLoading(false))
-  }, [currentDate])
+  const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getTime()
+  const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getTime()
 
-  const eventosPorDia: Record<string, Evento[]> = {}
+  const convexEvents = useQuery(api.events.listByUser, { 
+    userId: "user-123", 
+    start: startOfMonth, 
+    end: endOfMonth 
+  })
+
+  const eventos = convexEvents || []
+  const loading = convexEvents === undefined
+
+  const eventosPorDia: Record<string, any[]> = {}
   for (const e of eventos) {
-    const key = new Date(e.data).toDateString()
+    const key = new Date(e.start).toDateString()
     if (!eventosPorDia[key]) eventosPorDia[key] = []
     eventosPorDia[key].push(e)
   }
@@ -128,15 +117,15 @@ export function AgendaView({ onOpenProcess }: Props) {
               <div className="space-y-0.5">
                 {evts.slice(0, 3).map((e) => (
                   <div
-                    key={e.id}
+                    key={e._id}
                     onClick={(ev) => {
                       ev.stopPropagation()
                       if (e.processId) onOpenProcess(e.processId)
                     }}
-                    className={cn('text-[9px] md:text-[10px] px-1 md:px-1.5 py-0.5 rounded text-white truncate', colorForTipo(e.tipo))}
-                    title={e.titulo}
+                    className={cn('text-[9px] md:text-[10px] px-1 md:px-1.5 py-0.5 rounded text-white truncate', colorForTipo(e.type))}
+                    title={e.title}
                   >
-                    <span className="hidden sm:inline">{e.titulo}</span>
+                    <span className="hidden sm:inline">{e.title}</span>
                     <span className="sm:hidden">•</span>
                   </div>
                 ))}
@@ -176,18 +165,17 @@ export function AgendaView({ onOpenProcess }: Props) {
               </div>
               <div className="space-y-1">
                 {evts.map((e) => {
-                  const Icon = iconForTipo(e.tipo)
+                  const Icon = iconForTipo(e.type)
                   return (
                     <div
-                      key={e.id}
+                      key={e._id}
                       onClick={() => e.processId && onOpenProcess(e.processId)}
-                      className={cn('rounded p-1.5 cursor-pointer text-white text-[11px]', colorForTipo(e.tipo))}
+                      className={cn('rounded p-1.5 cursor-pointer text-white text-[11px]', colorForTipo(e.type))}
                     >
                       <div className="flex items-center gap-1 mb-0.5">
                         <Icon className="h-3 w-3" />
-                        <span className="font-medium truncate">{e.titulo}</span>
+                        <span className="font-medium truncate">{e.title}</span>
                       </div>
-                      {e.cliente && <p className="opacity-90 truncate">{e.cliente}</p>}
                     </div>
                   )
                 })}
@@ -222,28 +210,19 @@ export function AgendaView({ onOpenProcess }: Props) {
             ) : (
               <ul className="space-y-2">
                 {evts.map((e) => {
-                  const Icon = iconForTipo(e.tipo)
+                  const Icon = iconForTipo(e.type)
                   return (
                     <li
-                      key={e.id}
+                      key={e._id}
                       onClick={() => e.processId && onOpenProcess(e.processId)}
                       className="rounded-md border border-border p-3 cursor-pointer hover:bg-accent/40 transition-colors flex items-start gap-3"
                     >
-                      <div className={cn('h-9 w-9 rounded-md text-white flex items-center justify-center shrink-0', colorForTipo(e.tipo))}>
+                      <div className={cn('h-9 w-9 rounded-md text-white flex items-center justify-center shrink-0', colorForTipo(e.type))}>
                         <Icon className="h-4 w-4" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">{e.titulo}</p>
-                        {e.processo && <p className="text-[11px] text-muted-foreground truncate">{e.processo}</p>}
-                        {e.cliente && <p className="text-[11px] text-muted-foreground truncate">👤 {e.cliente}</p>}
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium', priorityColor(e.prioridade))}>
-                            {e.prioridade}
-                          </span>
-                          {e.responsavel && (
-                            <span className="text-[10px] text-muted-foreground">• {e.responsavel}</span>
-                          )}
-                        </div>
+                        <p className="text-sm font-medium">{e.title}</p>
+                        {e.description && <p className="text-[11px] text-muted-foreground truncate">{e.description}</p>}
                       </div>
                     </li>
                   )
@@ -336,26 +315,22 @@ export function AgendaView({ onOpenProcess }: Props) {
           ) : (
             <ul className="space-y-2">
               {eventos.slice(0, 5).map((e) => {
-                const Icon = iconForTipo(e.tipo)
+                const Icon = iconForTipo(e.type)
                 return (
                   <li
-                    key={e.id}
+                    key={e._id}
                     onClick={() => e.processId && onOpenProcess(e.processId)}
                     className="flex items-center gap-3 p-2 rounded hover:bg-accent/40 cursor-pointer"
                   >
-                    <div className={cn('h-8 w-8 rounded-md text-white flex items-center justify-center shrink-0', colorForTipo(e.tipo))}>
+                    <div className={cn('h-8 w-8 rounded-md text-white flex items-center justify-center shrink-0', colorForTipo(e.type))}>
                       <Icon className="h-3.5 w-3.5" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{e.titulo}</p>
+                      <p className="text-sm font-medium truncate">{e.title}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {new Date(e.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                        {e.cliente && ` • ${e.cliente}`}
+                        {new Date(e.start).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </p>
                     </div>
-                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium', priorityColor(e.prioridade))}>
-                      {e.prioridade}
-                    </span>
                   </li>
                 )
               })}
@@ -366,3 +341,4 @@ export function AgendaView({ onOpenProcess }: Props) {
     </div>
   )
 }
+
