@@ -162,7 +162,7 @@ app.all('/api/processes/:id', async (req, res) => {
 });
 
 // Map standard static endpoints
-app.all('/api/*', async (req, res, next) => {
+app.all(/\/api\/.*/, async (req, res, next) => {
   // Normalize path by stripping trailing slash
   const cleanPath = req.path.replace(/\/$/, '') || '/api';
   const targetRoute = routes[cleanPath];

@@ -5,9 +5,9 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
-    "dev:server": "node server.ts",
+    "dev:server": "PORT=4000 bun server.ts",
     "build": "vite build",
-    "start": "node server.ts",
+    "start": "bun server.ts",
     "lint": "eslint .",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

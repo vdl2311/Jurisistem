@@ -5,26 +5,29 @@ import fs from 'fs';
 const firebaseConfig = JSON.parse(fs.readFileSync('firebase-applet-config.json', 'utf8'));
 
 async function test() {
-  console.log("Testing (default) database...");
-  try {
-    const app = initializeApp(firebaseConfig);
-    const dbDefault = initializeFirestore(app, {});
-    const snap = await getDocs(collection(dbDefault, 'test'));
-    console.log("Success with (default) database, size:", snap.size);
-  } catch (e: any) {
-    console.error("Failed with (default) database:", e.message);
-  }
-
   console.log("Testing custom database...");
   try {
     const app = initializeApp(firebaseConfig, 'custom');
     const dbCustom = initializeFirestore(app, {
       databaseId: firebaseConfig.firestoreDatabaseId
     });
-    const snap = await getDocs(collection(dbCustom, 'test'));
-    console.log("Success with custom database, size:", snap.size);
+
+    console.log("=== COLLECTION 'User' ===");
+    const snapUserUpper = await getDocs(collection(dbCustom, 'User'));
+    console.log("Size:", snapUserUpper.size);
+    snapUserUpper.forEach(doc => {
+      console.log(doc.id, "=>", doc.data());
+    });
+
+    console.log("\n=== COLLECTION 'user' ===");
+    const snapUserLower = await getDocs(collection(dbCustom, 'user'));
+    console.log("Size:", snapUserLower.size);
+    snapUserLower.forEach(doc => {
+      console.log(doc.id, "=>", doc.data());
+    });
+
   } catch (e: any) {
-    console.error("Failed with custom database:", e.message);
+    console.error("Client SDK error:", e.message);
   }
 }
 
