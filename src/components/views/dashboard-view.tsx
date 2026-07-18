@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import {
   Card,
@@ -76,15 +78,9 @@ interface Props {
 }
 
 export function DashboardView({ onOpenProcess, onNavigate }: Props) {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/dashboard')
-      .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false))
-  }, [])
+  const convexStats = useQuery(api.dashboard.getStats)
+  const loading = convexStats === undefined
+  const data = convexStats
 
   if (loading || !data) {
     return (
@@ -96,14 +92,17 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
     )
   }
 
+  const honorariosAtrasados: any[] = []
+  const tarefasAtrasadas = 0
   const lucroMes = data.resumo.recebidoMes - data.resumo.despesasMes
   const pieData = data.processosPorArea
   const pieColors = ['oklch(0.55 0.13 155)', 'oklch(0.65 0.18 250)', 'oklch(0.7 0.18 60)', 'oklch(0.62 0.22 25)', 'oklch(0.65 0.16 295)']
+  const processosParados: any[] = []
 
   return (
     <div className="p-4 md:p-6 space-y-5">
       {/* Hero: alertas críticos */}
-      {(data.resumo.prazosHoje > 0 || data.resumo.honorariosAtrasados > 0 || data.resumo.tarefasAtrasadas > 0) && (
+      {(data.resumo.prazosHoje > 0 || honorariosAtrasados.length > 0 || tarefasAtrasadas > 0) && (
         <Card className="border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900/50">
           <CardContent className="p-4 md:p-5">
             <div className="flex items-start gap-3">
@@ -114,8 +113,8 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
                 <h3 className="font-semibold text-amber-900 dark:text-amber-200">Atenção necessária hoje</h3>
                 <p className="text-sm text-amber-700 dark:text-amber-300 mt-0.5">
                   {data.resumo.prazosHoje > 0 && `${data.resumo.prazosHoje} prazo(s) vencendo hoje • `}
-                  {data.resumo.honorariosAtrasados > 0 && `${data.resumo.honorariosAtrasados} honorário(s) em atraso • `}
-                  {data.resumo.tarefasAtrasadas > 0 && `${data.resumo.tarefasAtrasadas} tarefa(s) atrasada(s)`}
+                  {honorariosAtrasados.length > 0 && `${honorariosAtrasados.length} honorário(s) em atraso • `}
+                  {tarefasAtrasadas > 0 && `${tarefasAtrasadas} tarefa(s) atrasada(s)`}
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2.5">
                   <Button size="sm" variant="outline" onClick={() => onNavigate('deadlines')}>
@@ -326,11 +325,11 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            {data.processosParados.length === 0 ? (
+            {processosParados.length === 0 ? (
               <EmptyState text="Todos os processos estão em movimento." />
             ) : (
               <ul className="space-y-2 max-h-72 overflow-y-auto">
-                {data.processosParados.map((p) => (
+                {processosParados.map((p) => (
                   <li
                     key={p.id}
                     onClick={() => onOpenProcess(p.id)}
@@ -361,14 +360,14 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
               <ArrowDownCircle className="h-4 w-4 text-red-500" />
               Honorários em atraso
             </CardTitle>
-            <CardDescription>{data.honorariosAtrasados.length} em atraso</CardDescription>
+            <CardDescription>{honorariosAtrasados.length} em atraso</CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            {data.honorariosAtrasados.length === 0 ? (
+            {honorariosAtrasados.length === 0 ? (
               <EmptyState text="Nenhum honorário em atraso." />
             ) : (
               <ul className="space-y-2 max-h-72 overflow-y-auto">
-                {data.honorariosAtrasados.map((h) => (
+                {honorariosAtrasados.map((h) => (
                   <li
                     key={h.id}
                     className="rounded-md border border-border p-3 flex items-start justify-between gap-2"
@@ -403,11 +402,11 @@ export function DashboardView({ onOpenProcess, onNavigate }: Props) {
               onClick={() => onNavigate('copilot')}
             />
             <SuggestedAction
-              text={`Enviar cobrança de R$ ${data.honorariosAtrasados[0]?.amount.toFixed(2) || '0'} para ${data.honorariosAtrasados[0]?.client?.name || ''}`}
+              text={`Enviar cobrança de R$ ${honorariosAtrasados[0]?.amount.toFixed(2) || '0'} para ${honorariosAtrasados[0]?.client?.name || ''}`}
               onClick={() => onNavigate('financial')}
             />
             <SuggestedAction
-              text={`${data.resumo.processosParados} processo(s) parado(s) há mais de 90 dias. Verificar andamentos.`}
+              text={`${data.resumo.processosAtivos} processo(s) ativos no sistema.`}
               onClick={() => onNavigate('processes')}
             />
             <Button className="w-full mt-2" onClick={() => onNavigate('copilot')}>

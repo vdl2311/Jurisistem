@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -31,39 +33,52 @@ interface Props {
 }
 
 export function DeadlinesView({ onOpenProcess }: Props) {
-  const [items, setItems] = useState<Deadline[]>([])
-  const [loading, setLoading] = useState(true)
+  const convexDeadlines = useQuery(api.deadlines.list)
+  const completeDeadline = useMutation(api.deadlines.complete)
+  
   const [periodo, setPeriodo] = useState('7dias')
   const { toast } = useToast()
 
-  const load = () => {
-    setLoading(true)
-    fetch(`/api/deadlines?periodo=${periodo}&done=false`)
-      .then((r) => r.json())
-      .then(setItems)
-      .finally(() => setLoading(false))
-  }
+  const items = (convexDeadlines || []).filter(d => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const deadlineDate = new Date(d.dueDate)
+    
+    if (periodo === 'hoje') {
+      return deadlineDate.toDateString() === today.toDateString()
+    }
+    if (periodo === '7dias') {
+      const weekFromNow = new Date()
+      weekFromNow.setDate(today.getDate() + 7)
+      return deadlineDate >= today && deadlineDate <= weekFromNow
+    }
+    if (periodo === 'atrasados') {
+      return deadlineDate < today && d.status !== 'Concluído'
+    }
+    return true
+  })
 
-  useEffect(() => {
-    load()
-  }, [periodo])
+  const loading = convexDeadlines === undefined
 
-  const toggleDone = async (d: Deadline) => {
-    await fetch(`/api/deadlines?id=${d.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ done: !d.done }),
-    })
-    toast({
-      title: d.done ? 'Prazo reaberto' : 'Prazo concluído',
-      description: d.title,
-    })
-    load()
+  const toggleDone = async (d: any) => {
+    try {
+      await completeDeadline({ id: d._id })
+      toast({
+        title: 'Prazo concluído',
+        description: d.title,
+      })
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message || 'Falha ao atualizar prazo.',
+        variant: 'destructive',
+      })
+    }
   }
 
   const grouped: Record<string, Deadline[]> = {}
   for (const d of items) {
-    const key = formatDate(d.dueDate)
+    const key = formatDate(new Date(d.dueDate).toISOString())
     if (!grouped[key]) grouped[key] = []
     grouped[key].push(d)
   }
@@ -111,12 +126,14 @@ export function DeadlinesView({ onOpenProcess }: Props) {
                 </Badge>
               </div>
               <ul className="space-y-2">
-                {grouped[date].map((d) => {
-                  const dias = daysUntil(d.dueDate)
-                  const atrasado = dias < 0 && !d.done
+                {grouped[date].map((d: any) => {
+                  const deadlineISO = new Date(d.dueDate).toISOString()
+                  const dias = daysUntil(deadlineISO)
+                  const isDone = d.status === 'Concluído'
+                  const atrasado = dias < 0 && !isDone
                   return (
                     <Card
-                      key={d.id}
+                      key={d._id}
                       className={cn(atrasado && 'border-red-300 dark:border-red-900/50')}
                     >
                       <CardContent className="p-3.5 flex items-start gap-3">
@@ -124,51 +141,44 @@ export function DeadlinesView({ onOpenProcess }: Props) {
                           onClick={() => toggleDone(d)}
                           className={cn(
                             'mt-0.5 h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors',
-                            d.done ? 'bg-emerald-500 border-emerald-500' : 'border-input hover:border-primary'
+                            isDone ? 'bg-emerald-500 border-emerald-500' : 'border-input hover:border-primary'
                           )}
                         >
-                          {d.done && <CheckSquare className="h-3.5 w-3.5 text-white" />}
+                          {isDone && <CheckSquare className="h-3.5 w-3.5 text-white" />}
                         </button>
 
                         <div className="flex-1 min-w-0">
-                          <p className={cn('text-sm font-medium', d.done && 'line-through text-muted-foreground')}>
+                          <p className={cn('text-sm font-medium', isDone && 'line-through text-muted-foreground')}>
                             {d.title}
                           </p>
-                          {d.process && (
+                          {d.processNumber && (
                             <button
-                              onClick={() => onOpenProcess(d.process!.id)}
+                              onClick={() => d.processId && onOpenProcess(d.processId)}
                               className="text-[11px] text-muted-foreground hover:text-primary truncate block mt-0.5"
                             >
-                              {d.process.title} • {d.process.client.name}
+                              Proc: {d.processNumber}
                             </button>
                           )}
                           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                             <span className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium', priorityColor(d.priority))}>
                               {d.priority}
                             </span>
-                            <span className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium',
-                              d.type === 'Fatal' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900' : 'border-border text-muted-foreground'
-                            )}>
-                              {d.type}
-                            </span>
-                            {d.responsible && (
-                              <span className="text-[10px] text-muted-foreground">• {d.responsible}</span>
-                            )}
+                            
                             <span className={cn(
                               'text-[10px] font-medium',
                               atrasado ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'
                             )}>
-                              • {relativeDate(d.dueDate)}
+                              • {relativeDate(deadlineISO)}
                             </span>
                           </div>
-                          {d.notes && <p className="text-[11px] text-muted-foreground mt-1">{d.notes}</p>}
+                          {d.description && <p className="text-[11px] text-muted-foreground mt-1">{d.description}</p>}
                         </div>
 
-                        {d.process && (
+                        {d.processId && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => onOpenProcess(d.process!.id)}
+                            onClick={() => onOpenProcess(d.processId!)}
                             className="shrink-0"
                           >
                             Abrir

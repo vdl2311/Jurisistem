@@ -1,5 +1,7 @@
 'use client'
 
+import { useMutation, useQuery } from 'convex/react'
+import { api } from '../../convex/_generated/api'
 import { useState } from 'react'
 import { Scale, Lock, Mail, Shield, ArrowRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,13 +10,14 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { auth } from '@/lib/firebase'
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth'
-import { db } from '@/lib/db'
 
 interface LoginProps {
   onLogin: (user: { id: string; name: string; email: string; role: string }) => void
 }
 
 export function LoginScreen({ onLogin }: LoginProps) {
+  const createUser = useMutation(api.users.createUser)
+  
   const [email, setEmail] = useState('vidal2311usa@gmail.com')
   const [password, setPassword] = useState('123456')
   const [twoFactorCode, setTwoFactorCode] = useState('')
@@ -74,55 +77,27 @@ export function LoginScreen({ onLogin }: LoginProps) {
         throw new Error('Falha na autenticação.');
       }
 
-      // Busca dados adicionais do usuário (como role) no Firestore
-      let userDoc = await db.user.findUnique({ where: { email } });
+      // Sincroniza com o Convex
+      const role = email === 'vidal2311usa@gmail.com' || email === 'admin@jusflow.com' ? 'Admin' : 'Advogado';
+      const name = email === 'vidal2311usa@gmail.com' ? 'Administrador (Vidal)' : (email === 'admin@jusflow.com' ? 'Administrador' : 'Dr. Roberto Lima');
       
-      if (!userDoc) {
-        // Cria documento do usuário em lote no Firestore caso não exista
-        const role = email === 'vidal2311usa@gmail.com' || email === 'admin@jusflow.com' ? 'Admin' : 'Advogado';
-        const name = email === 'vidal2311usa@gmail.com' ? 'Administrador (Vidal)' : (email === 'admin@jusflow.com' ? 'Administrador' : 'Dr. Roberto Lima');
-        
-        userDoc = await db.user.create({
-          data: {
-            id: firebaseUser.uid,
-            name,
-            email,
-            password: 'firebase-auth-managed',
-            role,
-            permissions: 'all',
-            twoFactorEnabled: false
-          }
-        });
-      }
+      const convexUserId = await createUser({
+        name,
+        email,
+        role,
+      })
 
-      if (userDoc.twoFactorEnabled && twoFactorCode !== '123456') {
+      if (requires2FA && twoFactorCode !== '123456') {
         setRequires2FA(true);
         setLoading(false);
         return;
       }
 
-      // Registra último login e log de auditoria
-      await db.user.update({
-        where: { id: userDoc.id },
-        data: { lastLogin: new Date() },
-      });
-
-      await db.auditLog.create({
-        data: {
-          user: userDoc.name,
-          action: 'LOGIN',
-          entity: 'User',
-          entityId: userDoc.id,
-          details: `Login via Firebase Auth realizado por ${userDoc.email}`,
-        },
-      });
-
       onLogin({
-        id: userDoc.id,
-        name: userDoc.name,
-        email: userDoc.email,
-        role: userDoc.role,
-        permissions: userDoc.permissions || 'all',
+        id: convexUserId,
+        name,
+        email,
+        role,
       });
     } catch (err: any) {
       console.error("Login Error:", err);

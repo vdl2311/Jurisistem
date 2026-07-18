@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -52,47 +54,49 @@ interface Props {
 }
 
 export function ClientsView({ selectedId }: Props) {
-  const [items, setItems] = useState<Client[]>([])
-  const [loading, setLoading] = useState(true)
+  const convexClients = useQuery(api.clients.list)
+  const createClient = useMutation(api.clients.create)
+  const updateClient = useMutation(api.clients.update)
+  
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('Todos')
   const [modalOpen, setModalOpen] = useState(false)
-  const [selected, setSelected] = useState<Client | null>(null)
+  const [selected, setSelected] = useState<any | null>(null)
   const { toast } = useToast()
 
-  const load = () => {
-    setLoading(true)
-    const params = new URLSearchParams()
-    if (search) params.set('search', search)
-    if (status !== 'Todos') params.set('status', status)
-    fetch(`/api/clients?${params}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setItems(d)
-        if (selectedId) {
-          const sel = d.find((c: Client) => c.id === selectedId)
-          if (sel) setSelected(sel)
-        }
-      })
-      .finally(() => setLoading(false))
-  }
+  const items = (convexClients || []).filter(c => {
+    const matchesSearch = !search || 
+      c.name.toLowerCase().includes(search.toLowerCase()) || 
+      c.cpfCnpj.includes(search) || 
+      c.email.toLowerCase().includes(search.toLowerCase())
+    const matchesStatus = status === 'Todos' || c.status === status
+    return matchesSearch && matchesStatus
+  })
+
+  const loading = convexClients === undefined
 
   useEffect(() => {
-    load()
-  }, [search, status])
+    if (selectedId && convexClients) {
+      const sel = convexClients.find((c: any) => c._id === selectedId)
+      if (sel) setSelected(sel)
+    }
+  }, [selectedId, convexClients])
 
-  const handleCreate = async (data: Record<string, unknown>) => {
-    const res = await fetch('/api/clients', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (res.ok) {
-      toast({ title: 'Cliente cadastrado', description: 'Cliente criado com sucesso.' })
+  const handleCreate = async (data: any) => {
+    try {
+      await createClient({
+        name: data.name,
+        email: data.email,
+        phone: data.phone || data.mobile || "",
+        cpfCnpj: data.document || "",
+        type: data.type === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física',
+        address: data.address,
+        notes: data.notes,
+      })
+      toast({ title: 'Cliente cadastrado', description: 'Cliente criado com sucesso no Convex.' })
       setModalOpen(false)
-      load()
-    } else {
-      toast({ title: 'Erro', description: 'Falha ao cadastrar cliente.', variant: 'destructive' })
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message || 'Falha ao cadastrar cliente.', variant: 'destructive' })
     }
   }
 
@@ -136,7 +140,7 @@ export function ClientsView({ selectedId }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {items.map((c) => (
             <Card
-              key={c.id}
+              key={c._id}
               className="cursor-pointer hover:shadow-md hover:border-primary/30 transition-all"
               onClick={() => setSelected(c)}
             >
@@ -144,12 +148,12 @@ export function ClientsView({ selectedId }: Props) {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="h-10 w-10 rounded-full bg-primary/15 text-primary flex items-center justify-center shrink-0">
-                      {c.type === 'PJ' ? <Building2 className="h-5 w-5" /> : <User className="h-5 w-5" />}
+                      {c.type.includes('Jurídica') ? <Building2 className="h-5 w-5" /> : <User className="h-5 w-5" />}
                     </div>
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate">{c.name}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {c.type === 'PJ' ? 'CNPJ' : 'CPF'}: {c.document || '-'}
+                        {c.type.includes('Jurídica') ? 'CNPJ' : 'CPF'}: {c.cpfCnpj || '-'}
                       </p>
                     </div>
                   </div>
@@ -159,17 +163,13 @@ export function ClientsView({ selectedId }: Props) {
                 </div>
 
                 <div className="flex flex-wrap gap-1">
-                  {c.tags?.split(',').map((t) => (
-                    <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                      {t.trim()}
-                    </span>
-                  ))}
+                  {/* Se houver tags no Convex, implementar futuramente */}
                 </div>
 
                 <div className="flex items-center gap-3 text-[11px] text-muted-foreground pt-2 border-t border-border">
-                  <span>{c._count.processes} proc.</span>
-                  <span>{c._count.tasks} tarefas</span>
-                  <span>{c._count.financials} fin.</span>
+                  <span>0 proc.</span>
+                  <span>0 tarefas</span>
+                  <span>0 fin.</span>
                 </div>
               </CardContent>
             </Card>
@@ -187,25 +187,25 @@ export function ClientsView({ selectedId }: Props) {
   )
 }
 
-function ClientDetailModal({ client, onOpenChange }: { client: Client | null; onOpenChange: (v: boolean) => void }) {
+function ClientDetailModal({ client, onOpenChange }: { client: any | null; onOpenChange: (v: boolean) => void }) {
   if (!client) return null
   return (
     <Dialog open={!!client} onOpenChange={onOpenChange}>
       <DialogContent className="w-[95vw] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {client.type === 'PJ' ? <Building2 className="h-5 w-5" /> : <User className="h-5 w-5" />}
+            {client.type.includes('Jurídica') ? <Building2 className="h-5 w-5" /> : <User className="h-5 w-5" />}
             {client.name}
           </DialogTitle>
           <DialogDescription>
-            {client.type === 'PJ' ? 'Pessoa jurídica' : 'Pessoa física'} • Cliente desde {formatDate(client.createdAt)}
+            {client.type} • Cliente desde {formatDate(new Date(client.createdAt).toISOString())}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="text-[11px] text-muted-foreground">{client.type === 'PJ' ? 'CNPJ' : 'CPF'}</p>
-              <p className="font-medium">{client.document || '-'}</p>
+              <p className="text-[11px] text-muted-foreground">{client.type.includes('Jurídica') ? 'CNPJ' : 'CPF'}</p>
+              <p className="font-medium">{client.cpfCnpj || '-'}</p>
             </div>
             <div>
               <p className="text-[11px] text-muted-foreground">Status</p>
@@ -221,19 +221,11 @@ function ClientDetailModal({ client, onOpenChange }: { client: Client | null; on
             {client.phone && (
               <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground" /> {client.phone}</div>
             )}
-            {(client.city || client.state) && (
-              <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-muted-foreground" /> {client.city}/{client.state}</div>
+            {client.address && (
+              <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-muted-foreground" /> {client.address}</div>
             )}
           </div>
-          {client.tags && (
-            <div className="flex flex-wrap gap-1">
-              {client.tags.split(',').map((t) => (
-                <span key={t} className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                  {t.trim()}
-                </span>
-              ))}
-            </div>
-          )}
+          
           {client.notes && (
             <div>
               <p className="text-[11px] text-muted-foreground uppercase tracking-wider mb-1">Observações</p>
@@ -241,9 +233,9 @@ function ClientDetailModal({ client, onOpenChange }: { client: Client | null; on
             </div>
           )}
           <div className="flex gap-3 pt-2 border-t border-border text-sm">
-            <div><strong>{client._count.processes}</strong> processos</div>
-            <div><strong>{client._count.tasks}</strong> tarefas</div>
-            <div><strong>{client._count.financials}</strong> financeiros</div>
+            <div><strong>0</strong> processos</div>
+            <div><strong>0</strong> tarefas</div>
+            <div><strong>0</strong> financeiros</div>
           </div>
         </div>
       </DialogContent>

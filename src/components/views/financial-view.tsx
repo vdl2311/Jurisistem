@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -38,29 +40,22 @@ interface Financial {
 }
 
 export function FinancialView() {
-  const [items, setItems] = useState<Financial[]>([])
-  const [loading, setLoading] = useState(true)
+  const convexFinancial = useQuery(api.financial.list)
+  const markAsPaid = useMutation(api.financial.markAsPaid)
   const [tab, setTab] = useState('todos')
 
-  const loadFinancial = () => {
-    setLoading(true)
-    fetch(`/api/financial?type=${tab === 'todos' ? 'Todos' : tab === 'receitas' ? 'Receita' : tab === 'despesas' ? 'Despesa' : 'Todos'}`)
-      .then((r) => r.json())
-      .then(setItems)
-      .finally(() => setLoading(false))
-  }
+  const loading = convexFinancial === undefined
+  const allItems = convexFinancial || []
+  
+  const items = allItems.filter(i => {
+    if (tab === 'todos') return true
+    if (tab === 'receitas') return i.type === 'Receita'
+    if (tab === 'despesas') return i.type === 'Despesa'
+    return true
+  })
 
-  useEffect(() => {
-    loadFinancial()
-  }, [tab])
-
-  const markPaid = async (id: string) => {
-    await fetch(`/api/financial?id=${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'Pago', paidDate: new Date().toISOString() }),
-    })
-    loadFinancial()
+  const markPaid = async (id: any) => {
+    await markAsPaid({ id })
   }
 
   const totalReceita = items.filter((i) => i.type === 'Receita' && i.status === 'Pago').reduce((s, i) => s + i.amount, 0)
@@ -175,8 +170,8 @@ export function FinancialView() {
             </Card>
           ) : (
             <ul className="space-y-2">
-              {items.map((f) => (
-                <Card key={f.id}>
+              {items.map((f: any) => (
+                <Card key={f._id}>
                   <CardContent className="p-3.5 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className={cn(
@@ -189,7 +184,7 @@ export function FinancialView() {
                         <p className="text-sm font-medium truncate">{f.description}</p>
                         <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                           <span className="text-[10px] text-muted-foreground">{f.category}</span>
-                          {f.client && <span className="text-[10px] text-muted-foreground">• {f.client.name}</span>}
+                          {f.clientName && <span className="text-[10px] text-muted-foreground">• {f.clientName}</span>}
                           <span className="text-[10px] text-muted-foreground">• Venc.: {formatDate(f.dueDate)}</span>
                           {f.paidDate && <span className="text-[10px] text-muted-foreground">• Pago: {formatDate(f.paidDate)}</span>}
                         </div>
@@ -208,7 +203,7 @@ export function FinancialView() {
                         </span>
                       </div>
                       {f.status !== 'Pago' && (
-                        <Button size="sm" variant="outline" onClick={() => markPaid(f.id)} className="hidden md:flex">
+                        <Button size="sm" variant="outline" onClick={() => markPaid(f._id)} className="hidden md:flex">
                           Marcar pago
                         </Button>
                       )}

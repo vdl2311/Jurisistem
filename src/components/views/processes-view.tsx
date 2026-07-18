@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -57,49 +59,47 @@ const areas = ['Todos', 'Trabalhista', 'Cível', 'Tributário', 'Penal', 'Consum
 const statuses = ['Todos', 'Ativo', 'Suspenso', 'Encerrado', 'Arquivado']
 
 export function ProcessesView({ onOpenProcess, onNavigate }: Props) {
-  const [items, setItems] = useState<Process[]>([])
-  const [loading, setLoading] = useState(true)
+  const convexProcesses = useQuery(api.processes.list)
+  const convexClients = useQuery(api.clients.list)
+  const createProcess = useMutation(api.processes.create)
+
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('Todos')
   const [area, setArea] = useState('Todos')
   const [modalOpen, setModalOpen] = useState(false)
-  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const { toast } = useToast()
 
-  const load = () => {
-    setLoading(true)
-    const params = new URLSearchParams()
-    if (search) params.set('search', search)
-    if (status !== 'Todos') params.set('status', status)
-    if (area !== 'Todos') params.set('area', area)
-    fetch(`/api/processes?${params}`)
-      .then((r) => r.json())
-      .then((d) => setItems(d))
-      .finally(() => setLoading(false))
-  }
+  const items = (convexProcesses || []).filter(p => {
+    const matchesSearch = !search || 
+      p.title.toLowerCase().includes(search.toLowerCase()) || 
+      p.number.includes(search) || 
+      p.clientName.toLowerCase().includes(search.toLowerCase())
+    const matchesStatus = status === 'Todos' || p.status === status
+    const matchesArea = area === 'Todos' || p.category === area
+    return matchesSearch && matchesStatus && matchesArea
+  })
 
-  useEffect(() => {
-    load()
-  }, [search, status, area])
+  const loading = convexProcesses === undefined
+  const clients = convexClients || []
 
-  useEffect(() => {
-    fetch('/api/clients')
-      .then((r) => r.json())
-      .then((d) => setClients(d))
-  }, [])
-
-  const handleCreate = async (data: Record<string, unknown>) => {
-    const res = await fetch('/api/processes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (res.ok) {
-      toast({ title: 'Processo cadastrado', description: 'Processo criado com sucesso.' })
+  const handleCreate = async (data: any) => {
+    try {
+      const selectedClient = clients.find(c => c._id === data.clientId)
+      await createProcess({
+        number: data.cnj || "Sem Número",
+        title: data.title,
+        clientName: selectedClient?.name || "Cliente Desconhecido",
+        clientId: data.clientId,
+        court: data.court || "Não Informado",
+        instance: "1ª Instância",
+        category: data.area || "Geral",
+        priority: data.risk || "Normal",
+        value: typeof data.caseValue === 'number' ? data.caseValue : 0,
+      })
+      toast({ title: 'Processo cadastrado', description: 'Processo criado com sucesso no Convex.' })
       setModalOpen(false)
-      load()
-    } else {
-      toast({ title: 'Erro', description: 'Falha ao cadastrar processo.', variant: 'destructive' })
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message || 'Falha ao cadastrar processo.', variant: 'destructive' })
     }
   }
 
@@ -168,9 +168,9 @@ export function ProcessesView({ onOpenProcess, onNavigate }: Props) {
         <div className="space-y-2">
           {items.map((p) => (
             <Card
-              key={p.id}
+              key={p._id}
               className="cursor-pointer hover:shadow-md hover:border-primary/30 transition-all"
-              onClick={() => onOpenProcess(p.id)}
+              onClick={() => onOpenProcess(p._id)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -182,7 +182,7 @@ export function ProcessesView({ onOpenProcess, onNavigate }: Props) {
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm truncate">{p.title}</p>
                         <p className="text-[11px] text-muted-foreground truncate">
-                          {p.cnj || 'Sem CNJ'} • {p.client.name}
+                          {p.number || 'Sem Número'} • {p.clientName}
                         </p>
                       </div>
                     </div>
@@ -190,32 +190,32 @@ export function ProcessesView({ onOpenProcess, onNavigate }: Props) {
                       <span className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium', statusColor(p.status))}>
                         {p.status}
                       </span>
-                      {p.area && (
+                      {p.category && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
-                          {p.area}
+                          {p.category}
                         </span>
                       )}
-                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', riskColor(p.risk))}>
-                        Risco {p.risk}
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', riskColor(p.priority))}>
+                        Risco {p.priority}
                       </span>
-                      {p.caseValue !== null && p.caseValue > 0 && (
+                      {p.value !== undefined && p.value > 0 && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 font-medium">
-                          {formatCurrency(p.caseValue)}
+                          {formatCurrency(p.value)}
                         </span>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <div className="flex gap-1 text-[10px] text-muted-foreground">
-                      <span title="Andamentos">📄 {p._count.movements}</span>
-                      <span title="Prazos">⏰ {p._count.deadlines}</span>
-                      <span title="Tarefas">✓ {p._count.tasks}</span>
+                      <span title="Andamentos">📄 0</span>
+                      <span title="Prazos">⏰ 0</span>
+                      <span title="Tarefas">✓ 0</span>
                     </div>
-                    {p.cnj && (
+                    {p.number && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          onOpenProcess(p.id)
+                          onOpenProcess(p._id)
                           // Pequeno delay para garantir que a tela carregou
                           setTimeout(() => window.dispatchEvent(new CustomEvent('open-datajud')), 100)
                         }}
@@ -323,8 +323,8 @@ function NewProcessModal({
             <Select value={form.clientId} onValueChange={(v) => set('clientId', v)}>
               <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
               <SelectContent>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                {clients.map((c: any) => (
+                  <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

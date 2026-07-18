@@ -1,5 +1,7 @@
 'use client'
 
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../../convex/_generated/api'
 import { useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -62,59 +64,53 @@ const COLS = [
 ]
 
 export function TasksView({ onOpenProcess }: Props) {
-  const [items, setItems] = useState<Task[]>([])
-  const [loading, setLoading] = useState(true)
+  const convexTasks = useQuery(api.tasks.list)
+  const convexProcesses = useQuery(api.processes.list)
+  const convexClients = useQuery(api.clients.list)
+  const createTask = useMutation(api.tasks.create)
+  const updateTaskStatus = useMutation(api.tasks.updateStatus)
+
   const [modalOpen, setModalOpen] = useState(false)
-  const [processes, setProcesses] = useState<{ id: string; title: string }[]>([])
-  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const { toast } = useToast()
+
+  const items = convexTasks || []
+  const loading = convexTasks === undefined
+  const processes = convexProcesses || []
+  const clients = convexClients || []
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   )
 
-  const load = () => {
-    setLoading(true)
-    fetch('/api/tasks')
-      .then((r) => r.json())
-      .then(setItems)
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => {
-    load()
-    fetch('/api/processes').then((r) => r.json()).then(setProcesses)
-    fetch('/api/clients').then((r) => r.json()).then(setClients)
-  }, [])
-
   const onDragEnd = async (e: DragEndEvent) => {
     const { active, over } = e
     if (!over) return
     const newStatus = String(over.id)
-    const task = items.find((t) => t.id === active.id)
+    const task = items.find((t: any) => t._id === active.id)
     if (!task || task.status === newStatus) return
 
-    // otimista
-    setItems((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)))
-
-    await fetch(`/api/tasks?id=${task.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    })
-    toast({ title: 'Tarefa movida', description: `${task.title} → ${newStatus}` })
+    try {
+      await updateTaskStatus({ id: task._id as any, status: newStatus })
+      toast({ title: 'Tarefa movida', description: `${task.title} → ${newStatus}` })
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' })
+    }
   }
 
-  const handleCreate = async (data: Record<string, unknown>) => {
-    const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (res.ok) {
-      toast({ title: 'Tarefa criada' })
+  const handleCreate = async (data: any) => {
+    try {
+      await createTask({
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        dueDate: data.dueDate || new Date().toISOString(),
+        responsible: data.assignee,
+        processId: data.processId,
+      })
+      toast({ title: 'Tarefa criada no Convex' })
       setModalOpen(false)
-      load()
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' })
     }
   }
 
@@ -140,7 +136,7 @@ export function TasksView({ onOpenProcess }: Props) {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 flex-1 min-h-0">
             {COLS.map((col) => {
-              const colItems = items.filter((t) => t.status === col.id)
+              const colItems = items.filter((t: any) => t.status === col.id)
               return (
                 <Column key={col.id} col={col} tasks={colItems} onOpenProcess={onOpenProcess} />
               )
@@ -166,7 +162,7 @@ function Column({
   onOpenProcess,
 }: {
   col: { id: string; label: string; color: string }
-  tasks: Task[]
+  tasks: any[]
   onOpenProcess: (id: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.id })
@@ -200,9 +196,9 @@ function Column({
   )
 }
 
-function TaskCard({ task, onOpenProcess }: { task: Task; onOpenProcess: (id: string) => void }) {
+function TaskCard({ task, onOpenProcess }: { task: any; onOpenProcess: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: task.id,
+    id: task._id,
   })
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, zIndex: 50 }
@@ -244,11 +240,11 @@ function TaskCard({ task, onOpenProcess }: { task: Task; onOpenProcess: (id: str
                 {task.assignee}
               </span>
             )}
-            {task.process && (
+            {task.processId && (
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  onOpenProcess(task.process!.id)
+                  onOpenProcess(task.processId)
                 }}
                 className="text-[10px] text-primary hover:underline truncate ml-auto"
               >
@@ -271,8 +267,8 @@ function NewTaskModal({
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  processes: { id: string; title: string }[]
-  clients: { id: string; name: string }[]
+  processes: any[]
+  clients: any[]
   onSubmit: (data: Record<string, unknown>) => void
 }) {
   const [form, setForm] = useState({
@@ -347,8 +343,8 @@ function NewTaskModal({
             <Select value={form.processId} onValueChange={(v) => set('processId', v)}>
               <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
               <SelectContent>
-                {processes.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>
+                {processes.map((p: any) => (
+                  <SelectItem key={p._id} value={p._id}>{p.title}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
