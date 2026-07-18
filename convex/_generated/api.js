@@ -49,5 +49,22 @@ export const api = {
   },
   actions: {
     datajudSearch: "actions:datajudSearch",
+  },
+  mocks: {
+    getAgents: "mocks:getAgents",
+    runAgent: "mocks:runAgent",
+    getAutomations: "mocks:getAutomations",
+    getConflicts: "mocks:getConflicts",
+    getAdminStats: "mocks:getAdminStats",
+    syncDatajud: "mocks:syncDatajud",
+    getPortalData: "mocks:getPortalData",
+    getKnowledge: "mocks:getKnowledge",
+    getCompliance: "mocks:getCompliance",
+    getContracts: "mocks:getContracts",
+    getTemplates: "mocks:getTemplates",
+    runCopilot: "mocks:runCopilot",
+    runAiPeticao: "mocks:runAiPeticao",
+    runAiRevisao: "mocks:runAiRevisao",
+    runAiJurisprudencia: "mocks:runAiJurisprudencia",
   }
 };
