@@ -1,0 +1,402 @@
+// JusFlow - Sistema Jurídico SaaS
+// Schema completo para gestão de escritório de advocacia
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String   // hash bcrypt simulado
+  name          String
+  role          String   @default("Advogado") // Administrador, Sócio, Advogado, Estagiário, Secretária
+  oab           String?
+  avatar        String?
+  permissions   String?  // JSON serializado com permissões
+  twoFactorEnabled Boolean @default(false)
+  lastLogin     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("PF") // PF ou PJ
+  document    String?  // CPF ou CNPJ
+  email       String?
+  phone       String?
+  mobile      String?
+  address     String?
+  city        String?
+  state       String?
+  zipCode     String?
+  status      String   @default("Prospect") // Prospect, Ativo, Inativo
+  tags        String?  // separadas por vírgula
+  notes       String?
+  portalToken String?  // token de acesso ao portal do cliente
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  processes   Process[]
+  tasks       Task[]
+  financials  Financial[]
+  documents   Document[]
+  timelines   TimelineEntry[]
+  contracts   Contract[]
+  timeEntries TimeEntry[]
+}
+
+model Process {
+  id            String   @id @default(cuid())
+  cnj           String?  // número CNJ
+  title         String
+  court         String?  // Tribunal
+  section       String?  // Vara
+  classType     String?  // Classe
+  subject       String?  // Assunto
+  caseValue     Float?   @default(0)
+  parties       String?  // Partes (texto livre)
+  status        String   @default("Ativo") // Ativo, Suspenso, Encerrado, Arquivado
+  area          String?  // Trabalhista, Cível, Penal, etc
+  responsibleId String?  // advogado responsável (texto)
+  clientId      String
+  risk          String   @default("Médio") // Baixo, Médio, Alto
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  client        Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  movements     Movement[]
+  deadlines     Deadline[]
+  tasks         Task[]
+  financials    Financial[]
+  documents     Document[]
+  timelines     TimelineEntry[]
+  contracts     Contract[]
+  timeEntries   TimeEntry[]
+}
+
+model Movement {
+  id          String   @id @default(cuid())
+  processId   String
+  date        DateTime
+  description String
+  summary     String?  // resumo gerado por IA
+  important   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  process     Process  @relation(fields: [processId], references: [id], onDelete: Cascade)
+}
+
+model Deadline {
+  id          String   @id @default(cuid())
+  processId   String
+  title       String
+  dueDate     DateTime
+  type        String   @default("Interno") // Fatal, Interno
+  priority    String   @default("Média") // Baixa, Média, Alta, Crítica
+  responsible String?
+  done        Boolean  @default(false)
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  process     Process  @relation(fields: [processId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("A Fazer") // A Fazer, Em Andamento, Em Revisão, Concluída
+  priority    String   @default("Média") // Baixa, Média, Alta
+  dueDate     DateTime?
+  assignee    String?
+  processId   String?
+  clientId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  process     Process? @relation(fields: [processId], references: [id], onDelete: SetNull)
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model Financial {
+  id          String   @id @default(cuid())
+  type        String   // Receita, Despesa
+  category    String   // Honorários, Custas, Salários, Operacional
+  description String
+  amount      Float
+  dueDate     DateTime
+  paidDate    DateTime?
+  status      String   @default("Pendente") // Pendente, Pago, Atrasado
+  processId   String?
+  clientId    String?
+  createdAt   DateTime @default(now())
+
+  process     Process? @relation(fields: [processId], references: [id], onDelete: SetNull)
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("PDF") // PDF, Word, Excel, Imagem
+  size        String?
+  tags        String?
+  content     String?  // conteúdo textual extraído (para OCR/IA)
+  processId   String?
+  clientId    String?
+  contractId  String?
+  createdAt   DateTime @default(now())
+
+  process     Process?  @relation(fields: [processId], references: [id], onDelete: SetNull)
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  contract    Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+}
+
+model TimelineEntry {
+  id          String   @id @default(cuid())
+  processId   String
+  clientId    String?
+  date        DateTime
+  type        String   // Movimento, Documento, Tarefa, Prazo, Financeiro, Nota
+  title       String
+  description String?
+  metadata    String?  // JSON serializado
+  createdAt   DateTime @default(now())
+
+  process     Process  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  user        String
+  action      String   // CREATE, UPDATE, DELETE, LOGIN, LOGOUT
+  entity      String
+  entityId    String?
+  details     String?
+  ip          String?
+  createdAt   DateTime @default(now())
+}
+
+// ============ NOVOS MODELOS ============
+
+model ContractTemplate {
+  id          String   @id @default(cuid())
+  name        String   // ex: Contrato de Honorários, Procuração, Acordo
+  category    String   @default("Geral") // Honorários, Procuração, Acordo, Confidencialidade
+  content     String   // template com variáveis {{cliente}}, {{processo}}, etc
+  variables   String?  // lista de variáveis disponíveis (JSON)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contracts   Contract[]
+}
+
+model Contract {
+  id           String   @id @default(cuid())
+  title        String
+  templateId   String?
+  clientId     String
+  processId    String?
+  content      String   // conteúdo final gerado
+  status       String   @default("Rascunho") // Rascunho, Enviado, Assinado, Arquivado
+  signedBy     String?  // nomes dos signatários
+  signedAt     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client       Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  process      Process?         @relation(fields: [processId], references: [id], onDelete: SetNull)
+  template     ContractTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  documents    Document[]
+}
+
+model Automation {
+  id          String   @id @default(cuid())
+  name        String
+  trigger     String   // novo_processo, nova_audiencia, honorario_vencido, novo_andamento
+  actions     String   // JSON com lista de ações: criar_tarefa, enviar_email, gerar_contrato, etc
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  type        String   // prazo, audiencia, honorario, tarefa, sistema
+  title       String
+  description String?
+  link        String?  // rota para onde clicar
+  read        Boolean  @default(false)
+  priority    String   @default("Média")
+  createdAt   DateTime @default(now())
+}
+
+model TimeEntry {
+  id          String   @id @default(cuid())
+  description String
+  duration    Float    // em horas
+  date        DateTime
+  user        String   // advogado responsável
+  billable    Boolean  @default(true)
+  processId   String?
+  clientId    String?
+  createdAt   DateTime @default(now())
+
+  process     Process? @relation(fields: [processId], references: [id], onDelete: SetNull)
+  client      Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model ConflictCheck {
+  id          String   @id @default(cuid())
+  clientName  String
+  searchText  String
+  found       Boolean  @default(false)
+  matches     String?  // JSON com clientes/processos que deram match
+  checkedAt   DateTime @default(now())
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   // Starter, Pro, Enterprise
+  price       Float
+  maxUsers    Int
+  maxStorage  Int      // em MB
+  features    String?  // JSON com features habilitadas
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  planId      String
+  plan        Plan     @relation(fields: [planId], references: [id])
+  status      String   @default("Trial") // Trial, Ativa, Suspensa, Cancelada
+  startDate   DateTime @default(now())
+  endDate     DateTime?
+  createdAt   DateTime @default(now())
+}
+
+// ============ MODELOS INSPIRADOS NA NORM.AI ============
+
+// Agente jurídico autônomo - executa tarefas completas (não só responde)
+model Agent {
+  id            String   @id @default(cuid())
+  name          String   // ex: "Analisador de Contratos", "Verificador LGPD"
+  description   String
+  category      String   @default("Geral") // Contratos, Conformidade, Due Diligence, Pesquisa, Redação
+  capabilities  String?  // JSON com lista de capacidades
+  systemPrompt  String   // prompt do sistema que define o comportamento
+  tools         String?  // JSON com ferramentas disponíveis (search, generate, verify)
+  supervisionEnabled Boolean @default(true) // Supervisory AI (camada de verificação)
+  status        String   @default("Ativo") // Ativo, Pausado, Em Treinamento
+  icon          String?  // nome do ícone lucide
+  color         String?  // cor do card
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  runs          AgentRun[]
+}
+
+// Execução de um agente - registra input, output e verificação da Supervisory AI
+model AgentRun {
+  id            String   @id @default(cuid())
+  agentId       String
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  task          String   // descrição da tarefa solicitada
+  input         String?  // JSON com parâmetros de entrada
+  output        String   // resultado principal do agente
+  supervision   String?  // verificação da Supervisory AI (segunda IA que valida)
+  supervisionPassed Boolean @default(false)
+  supervisionNotes String? // observações do supervisor
+  status        String   @default("Concluído") // Pendente, Em Execução, Concluído, Erro, Rejeitado
+  duration      Int?     // duração em ms
+  tokensUsed    Int?     // tokens consumidos
+  processId     String?  // processo relacionado (opcional)
+  clientId      String?  // cliente relacionado (opcional)
+  userId        String?  // usuário que disparou
+  createdAt     DateTime @default(now())
+}
+
+// Base de conhecimento - artigos, teses, precedentes acumulados por caso
+model KnowledgeArticle {
+  id            String   @id @default(cuid())
+  title         String
+  content       String   // conteúdo completo (markdown)
+  summary       String?  // resumo gerado por IA
+  category      String   // Jurisprudência, Doutrina, Tese, Caso Prático, Modelo
+  area          String?  // Trabalhista, Cível, Tributário, etc
+  tags          String?  // tags separadas por vírgula
+  source        String?  // STJ, STF, TST, Doutrina, Caso Próprio
+  sourceUrl     String?  // URL original
+  author        String?  // advogado que criou
+  confidence    Int      @default(80) // 0-100 nível de confiança
+  verified      Boolean  @default(false) // verificado por advogado sênior
+  processId     String?  // processo que originou o conhecimento
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Regra de conformidade - regras codificadas (LGPD, OAB, conflitos)
+model ComplianceRule {
+  id            String   @id @default(cuid())
+  name          String
+  category      String   // LGPD, OAB, Confidencialidade, Conflito de Interesse, Ética
+  description   String
+  rule          String   // regra em linguagem natural (IA interpreta)
+  severity      String   @default("Média") // Baixa, Média, Alta, Crítica
+  actionType    String   @default("Aviso") // Aviso, Bloqueio, Aprovação Manual
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  checks        ComplianceCheck[]
+}
+
+// Verificação de conformidade - registro de cada verificação
+model ComplianceCheck {
+  id            String   @id @default(cuid())
+  ruleId        String
+  rule          ComplianceRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  entityType    String   // Process, Client, Contract, Document
+  entityId      String?
+  entityName    String?
+  passed        Boolean
+  notes         String?
+  checkedAt     DateTime @default(now())
+}
+
+// Padrões do escritório - risk posture, contexto institucional
+model FirmStandard {
+  id            String   @id @default(cuid())
+  category      String   // Risco, Confidencialidade, SLA, Comunicação, Qualidade
+  name          String
+  value         String   // valor do padrão
+  description   String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Pricing por resultado (Outcome-Driven Pricing)
+model OutcomePricing {
+  id            String   @id @default(cuid())
+  name          String   // ex: "Sucesso em Audiência", "Acordo Fechado"
+  description   String
+  basePrice     Float    // preço base
+  successPrice  Float    // preço adicional se bem-sucedido
+  successCriteria String // critério de sucesso
+  area          String?  // área jurídica aplicável
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

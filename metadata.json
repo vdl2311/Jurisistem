@@ -1,0 +1,6 @@
+{
+  "name": "Novo Jurisflow AI",
+  "description": "Plataforma avançada de IA para escritórios de advocacia, gestão jurídica, análise de processos, automação de petições e contratos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
