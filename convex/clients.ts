@@ -17,17 +17,22 @@ export const getById = query({
 export const create = mutation({
   args: {
     name: v.string(),
-    email: v.string(),
-    phone: v.string(),
-    cpfCnpj: v.string(),
     type: v.string(),
+    document: v.string(),
+    email: v.string(),
+    phone: v.optional(v.string()),
+    mobile: v.optional(v.string()),
     address: v.optional(v.string()),
+    city: v.optional(v.string()),
+    state: v.optional(v.string()),
+    zipCode: v.optional(v.string()),
+    status: v.string(),
+    tags: v.optional(v.array(v.string())),
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("clients", {
       ...args,
-      status: "Ativo",
       createdAt: Date.now(),
     });
   },

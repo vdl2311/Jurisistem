@@ -67,7 +67,7 @@ export function ClientsView({ selectedId }: Props) {
   const items = (convexClients || []).filter(c => {
     const matchesSearch = !search || 
       c.name.toLowerCase().includes(search.toLowerCase()) || 
-      c.cpfCnpj.includes(search) || 
+      c.document.includes(search) || 
       c.email.toLowerCase().includes(search.toLowerCase())
     const matchesStatus = status === 'Todos' || c.status === status
     return matchesSearch && matchesStatus
@@ -86,12 +86,18 @@ export function ClientsView({ selectedId }: Props) {
     try {
       await createClient({
         name: data.name,
-        email: data.email,
-        phone: data.phone || data.mobile || "",
-        cpfCnpj: data.document || "",
         type: data.type === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física',
-        address: data.address,
-        notes: data.notes,
+        document: data.document || "",
+        email: data.email,
+        phone: data.phone || "",
+        mobile: data.mobile || "",
+        address: data.address || "",
+        city: data.city || "",
+        state: data.state || "",
+        zipCode: data.zipCode || "",
+        status: data.status || 'Prospect',
+        tags: data.tags ? data.tags.split(',').map((t: string) => t.trim()) : [],
+        notes: data.notes || "",
       })
       toast({ title: 'Cliente cadastrado', description: 'Cliente criado com sucesso no Convex.' })
       setModalOpen(false)
@@ -153,7 +159,7 @@ export function ClientsView({ selectedId }: Props) {
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate">{c.name}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {c.type.includes('Jurídica') ? 'CNPJ' : 'CPF'}: {c.cpfCnpj || '-'}
+                        {c.type.includes('Jurídica') ? 'CNPJ' : 'CPF'}: {c.document || '-'}
                       </p>
                     </div>
                   </div>
@@ -205,7 +211,7 @@ function ClientDetailModal({ client, onOpenChange }: { client: any | null; onOpe
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-[11px] text-muted-foreground">{client.type.includes('Jurídica') ? 'CNPJ' : 'CPF'}</p>
-              <p className="font-medium">{client.cpfCnpj || '-'}</p>
+              <p className="font-medium">{client.document || '-'}</p>
             </div>
             <div>
               <p className="text-[11px] text-muted-foreground">Status</p>

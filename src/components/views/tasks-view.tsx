@@ -68,7 +68,7 @@ export function TasksView({ onOpenProcess }: Props) {
   const convexProcesses = useQuery(api.processes.list)
   const convexClients = useQuery(api.clients.list)
   const createTask = useMutation(api.tasks.create)
-  const updateTaskStatus = useMutation(api.tasks.updateStatus)
+  const updateTask = useMutation(api.tasks.update)
 
   const [modalOpen, setModalOpen] = useState(false)
   const { toast } = useToast()
@@ -90,7 +90,7 @@ export function TasksView({ onOpenProcess }: Props) {
     if (!task || task.status === newStatus) return
 
     try {
-      await updateTaskStatus({ id: task._id as any, status: newStatus })
+      await updateTask({ id: task._id as any, status: newStatus })
       toast({ title: 'Tarefa movida', description: `${task.title} → ${newStatus}` })
     } catch (error: any) {
       toast({ title: 'Erro', description: error.message, variant: 'destructive' })
@@ -101,11 +101,13 @@ export function TasksView({ onOpenProcess }: Props) {
     try {
       await createTask({
         title: data.title,
-        description: data.description,
-        priority: data.priority,
-        dueDate: data.dueDate || new Date().toISOString(),
-        responsible: data.assignee,
-        processId: data.processId,
+        description: data.description || "",
+        status: data.status || 'A Fazer',
+        priority: data.priority || 'Média',
+        dueDate: data.dueDate ? new Date(data.dueDate).getTime() : undefined,
+        assignee: data.assignee || "",
+        processId: data.processId as any,
+        clientId: data.clientId as any,
       })
       toast({ title: 'Tarefa criada no Convex' })
       setModalOpen(false)

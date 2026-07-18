@@ -2,9 +2,19 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    return await ctx.db.query("tasks").order("desc").collect();
+  args: { status: v.optional(v.string()), assignee: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    let tasks = await ctx.db.query("tasks").order("desc").collect();
+    
+    if (args.status && args.status !== "Todas") {
+      tasks = tasks.filter(t => t.status === args.status);
+    }
+    
+    if (args.assignee && args.assignee !== "Todos") {
+      tasks = tasks.filter(t => t.assignee === args.assignee);
+    }
+    
+    return tasks;
   },
 });
 
@@ -12,24 +22,40 @@ export const create = mutation({
   args: {
     title: v.string(),
     description: v.optional(v.string()),
+    status: v.string(),
     priority: v.string(),
-    dueDate: v.string(),
-    responsible: v.optional(v.string()),
-    processId: v.optional(v.string()),
+    dueDate: v.optional(v.number()),
+    assignee: v.optional(v.string()),
+    processId: v.optional(v.id("processes")),
+    clientId: v.optional(v.id("clients")),
   },
   handler: async (ctx, args) => {
-    const taskId = await ctx.db.insert("tasks", {
+    return await ctx.db.insert("tasks", {
       ...args,
-      status: "Pendente",
       createdAt: Date.now(),
     });
-    return taskId;
   },
 });
 
-export const updateStatus = mutation({
-  args: { id: v.id("tasks"), status: v.string() },
+export const update = mutation({
+  args: {
+    id: v.id("tasks"),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    status: v.optional(v.string()),
+    priority: v.optional(v.string()),
+    dueDate: v.optional(v.number()),
+    assignee: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, { status: args.status });
+    const { id, ...updates } = args;
+    await ctx.db.patch(id, updates);
+  },
+});
+
+export const remove = mutation({
+  args: { id: v.id("tasks") },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.id);
   },
 });
